@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Darkover NPC Buddy v1.0</title>
+<style>
+  body { margin: 0; font-family: sans-serif; background: #d3d3d3; }
+  header { padding: 10px; font-size: 24px; font-weight: bold; }
+  #messages { padding: 10px; min-height: 20px; }
+  .error { color: red; }
+  .warning { color: #b36b00; }
+  .container { display: flex; height: calc(100vh - 80px); padding: 10px; box-sizing: border-box; gap: 10px; }
+  .left, .right { flex: 1; padding: 10px; box-sizing: border-box; overflow-y: auto; background: #f5f5f5; border: 1px solid #aaa; }
+  .group { margin-bottom: 10px; padding: 8px; border: 1px solid #999; background: #fff; }
+  .group > label { display: block; font-weight: bold; margin-bottom: 4px; }
+  .inline { display: flex; gap: 10px; flex-wrap: wrap; }
+  .inline input[type="number"], .inline input[type="text"], .inline select { width: 16ch; }
+  input[type="text"], input[type="number"], select, textarea { width: 100%; box-sizing: border-box; }
+  textarea { height: 70px; }
+  .checkbox-group { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+  .checkbox-group label { font-weight: normal; }
+  .toggle-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  button { padding: 6px 10px; }
+  .colorOutput, #output, #inputArea {
+    width: 100%;
+    font-family: monospace;
+    white-space: pre-wrap;
+    box-sizing: border-box;
+    padding: 6px;
+    background: #000;
+    color: #fff;
+    resize: none;
+  }
+  #output { height: 34%; }
+  #inputArea { height: 18%; margin-top: 6px; }
+  .colorOutput { height: 34%; background: #111; margin-top: 6px; pointer-events: none; }
+  .colorSpan { font-family: monospace; }
+
+  /* Tooltip visual cue on any label with title */
+  label[title] {
+    text-decoration: underline;
+    text-decoration-color: #0066ff;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    cursor: help;
+  }
+
+  .help-table { width: 100%; border-collapse: collapse; font-size: 0.95em; }
+  .help-table th, .help-table td { border: 1px solid #ccc; padding: 2px 6px; text-align: left; }
+</style>
+</head>
+<body>
+<header>Darkover NPC Buddy v1.0</header>
+<div id="messages"></div>
+<div class="container">
+  <!-- LEFT PANE: Inputs -->
+  <div class="left">
+    <div class="group">
+      <label>Mobile VNUM</label>
+      <input type="number" id="vnum" min="1" placeholder="e.g., 14200">
+    </div>
+
+    <div class="group">
+      <label title="Space-separated names; avoid ANSI in name list">Name List</label>
+      <input type="text" id="namelist" placeholder="e.g., harpy winged serpentine scaly">
+    </div>
+
+    <div class="group">
+      <label title="Appears in combat and movement messages. Add ANSI codes to the object nouns only, not leading articles. Ends with ~ in output.">Short Description</label>
+      <input type="text" id="shortdesc" placeholder="e.g., a #Twinged, serpentine harpy##">
+    </div>
+
+    <div class="group">
+      <label title="Single line shown when entering a room or looking. Ends with ~ on its own following line in output.">Long Description</label>
+      <input type="text" id="longdesc" placeholder="e.g., #TScreaming and cackling, here flies a scaly, serpentine harpy.##">
+    </div>
+
+    <div class="group">
+      <label title="Multi-line description shown on examine. Ends with ~ on its own following line in output.">Mobile Description</label>
+      <textarea id="mobdesc" placeholder="Multi-line description here..."></textarea>
+    </div>
+
+    <!-- ACTIONS / AFFECTS / ALIGNMENT / TYPE -->
+    <div class="group">
+      <label title="Action flags, Affect flags, Alignment (use positive), and Mob Type (always D for Darkover)">Actions / Affects / Alignment / Type</label>
+      <div class="group">
+        <label title="E.g., Sentinel, Aggressive, Is Mage, etc.">Action Flags</label>
+        <div id="actionFlags" class="checkbox-group"></div>
+      </div>
+      <div class="group">
+        <label title="E.g., Sanctuary, Haste, Infravision, etc.">Affect Flags</label>
+        <div id="affectFlags" class="checkbox-group"></div>
+      </div>
+      <div class="inline">
+        <label style="display:block;">Alignment
+          <input type="number" id="alignment" value="300" min="-1000" max="1000" title="Doc recommends positive; -1000..1000">
+        </label>
+        <label style="display:block;">Mob Type
+          <input type="text" id="mobtype" value="D" disabled title="Always 'D' for Darkover mobiles">
+        </label>
+      </div>
+    </div>
+
+    <!-- ATTACK / RACE / STRATEGY / SECONDARY -->
+    <div class="group">
+      <label>Attack / Race / Strategy / Secondary Flags</label>
+      <div class="inline">
+        <label style="display:block;">Attack Type
+          <select id="attackType"></select>
+        </label>
+        <label style="display:block;">Mob Race
+          <select id="mobRace"></select>
+        </label>
+        <label style="display:block;">Attack Strategy
+          <select id="attackStrategy"></select>
+        </label>
+      </div>
+      <div class="group">
+        <label title="Elemental & misc bitvector">Secondary Flags</label>
+        <div id="secondaryFlags" class="checkbox-group"></div>
+      </div>
+    </div>
+
+    <!-- LEVEL / HITROLL / AC / HP DICE / DAM DICE -->
+    <div class="group">
+      <label title="Level, THAC0/Hitroll, Armor Value, HP Dice, Damage Dice">Level / Hitroll / AC / HP / Damage</label>
+      <div class="inline">
+        <label style="display:block;">Level<input type="number" id="level" value="10" min="1" max="50"></label>
+        <label style="display:block;" title="Mob hitroll (THAC0-like)"><span>Hitroll</span><input type="number" id="hitroll" value="5"></label>
+        <label style="display:block;" title="Armor Value (max ~200)"><span>Armor</span><input type="number" id="ac" value="20"></label>
+      </div>
+      <div class="inline">
+        <label style="display:block;" title="Format xdy+z, with lowercase d"><span>HP Dice</span><input type="text" id="hpDice" value="1d1+50" placeholder="e.g., 5d100+3000"></label>
+        <label style="display:block;" title="Format xdy+z, with lowercase d"><span>Damage Dice</span><input type="text" id="damDice" value="1d8+10" placeholder="e.g., 4d4+20"></label>
+      </div>
+    </div>
+
+    <!-- GOLD / AGGRO RACES -->
+    <div class="group">
+      <label>Gold / Aggressive Races</label>
+      <div class="inline">
+        <label style="display:block;">Gold<input type="number" id="gold" value="0" min="0"></label>
+      </div>
+      <div class="group">
+        <label title="Bitvector of player races this mob is aggressive to">Aggro Races</label>
+        <div id="aggroRaces" class="checkbox-group"></div>
+        <div class="toggle-buttons">
+          <button type="button" onclick="selectAggroGroup('good')">Select Good Races</button>
+          <button type="button" onclick="selectAggroGroup('evil')">Select Evil Races</button>
+          <button type="button" onclick="clearAggro()">Clear All</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- POSITIONS / GENDER -->
+    <div class="group">
+      <label>Positions / Gender</label>
+      <div class="inline">
+        <label style="display:block;" title="Loaded position"><span>Loaded Pos</span>
+          <select id="loadedPos"></select>
+        </label>
+        <label style="display:block;" title="Default post-interaction position"><span>Default Pos</span>
+          <select id="defaultPos"></select>
+        </label>
+        <label style="display:block;" title="0=Neutral, 1=Male, 2=Female"><span>Gender</span>
+          <select id="gender"></select>
+        </label>
+      </div>
+    </div>
+
+    <!-- Buttons on left -->
+    <div class="group inline">
+      <button id="generateBtn" type="button">Generate MOB</button>
+      <button id="loadBtn" type="button">Load From MOB Text</button>
+      <button id="addEndBtn" type="button" title="Append end-of-file marker to output">Append End Marker</button>
+      <button id="copyBtn" type="button">Copy Output</button>
+    </div>
+  </div>
+
+  <!-- RIGHT PANE: Output + Input + Color Preview -->
+  <div class="right">
+    <label title="Generated .MOB text (read-only)">Generated Output</label>
+    <textarea id="output" readonly></textarea>
+
+    <label title="Paste an existing .MOB entry here, then click 'Load From MOB Text'">Input (Paste to Load)</label>
+    <textarea id="inputArea" placeholder="#6800&#10;mob example~&#10;..."></textarea>
+
+    <label title="Color/ANSI preview for descriptions (Short, Long, Mobile)">Color Preview</label>
+    <div id="colorOutput" class="colorOutput"></div>
+  </div>
+</div>
+
+<script>
+/* ========================
+   Static data dictionaries
+   ======================== */
+
+const actionFlagDefs = [
+  ["^0","Special"],["^1","Sentinel"],["^2","Scavenger"],["^4","PMS"],["^5","Aggressive"],["^6","Stay Zone"],
+  ["^7","Wimpy"],["^11","Memory"],["^12","Helper"],["^15","Track"],["^16","AnimatedObj"],["^17","Nocturnal"],
+  ["^18","Daytime"],["^19","Is Cleric"],["^20","Is Mage"],["^21","Is Thief"],["^22","Is Warrior"],
+  ["^25","Stoneskin"],["^26","Fireshield"],["^27","Iceshield"],["^28","Water Only"],["^29","Mob Undead"],
+  ["^30","Mount"],["^31","Is Druid"]
+];
+
+const affectFlagDefs = [
+  ["^0","Blind"],["^1","Invisible"],["^3","See Invis"],["^4","Sense Magic"],["^5","Sense Life"],
+  ["^7","Sanctuary"],["^9","Curse"],["^10","No Summon"],["^11","Poison"],["^14","No Invis"],["^15","No Charm"],
+  ["^16","Sleep"],["^17","No Bash"],["^18","Sneak"],["^19","Hide"],["^20","Fear"],["^21","Charm"],
+  ["^24","Infravision"],["^25","Aware"],["^26","Fly"],["^27","Haste"],["^28","FaerieFire"],["^29","Regen"],
+  ["^30","SlowHeal"]
+];
+
+const attackTypes = [
+  [100,"100 - Standard Hit"],[101,"101 - Bludgeon"],[102,"102 - Backstab Pierce"],[103,"103 - Slash"],
+  [104,"104 - Blast"],[105,"105 - Whip"],[106,"106 - Pierce"],[107,"107 - Claw"],[108,"108 - Bite"],
+  [109,"109 - Sting"],[110,"110 - Crush"],[111,"111 - Missile"],[112,"112 - Cleave"]
+];
+
+const mobRaces = [
+  [1,"1 - Humanoid"],[2,"2 - Dragon"],[3,"3 - Giant"],[4,"4 - Demon"],[5,"5 - Divine"],[6,"6 - Animal"],
+  [7,"7 - Insect"],[8,"8 - Plants"],[9,"9 - Object"],[10,"10 - Ghost"],[11,"11 - Faerie"],[12,"12 - Troll"],
+  [13,"13 - Undead"],[14,"14 - Tree (special)"]
+];
+
+const strategies = [
+  [0,"0 - Standard"],[1,"1 - Random"],[2,"2 - Lowest HP"],[3,"3 - Highest HP"],[4,"4 - Lowest Level"],
+  [5,"5 - Highest Level"],[6,"6 - Brawl/Rescue"],[7,"7 - Guard"]
+];
+
+const secondaryFlagDefs = [
+  ["^0","Elemental Fire"],["^1","Elemental Earth"],["^2","Elemental Air"],["^3","Stay in Element"],
+  ["^4","Elemental Water"],["^5","Two spawn on death"],["^10","Magical Only dmg"],["^11","No_limited"],
+  ["^12","limited"]
+];
+
+const aggroRaceDefs = [
+  ["^1","Human"],["^2","Dwarf"],["^3","Wood Elf"],["^5","High Elf"],["^6","Sprite"],["^7","Shadow Elf"],
+  ["^8","Orc"],["^9","Saurian"],["^10","Minotaur"],["^11","Lich"],["^12","Faerie"],["^13","Troll"],
+  ["^14","Centaur"],["^15","Goblin"],["^16","Gnome"],["^17","Kyri"],["^18","Skaven"],["^19","Elouve"]
+];
+
+const posOptions = [
+  [4,"4 - Sleeping"],[5,"5 - Resting"],[6,"6 - Sitting"],[8,"8 - Standing"]
+];
+
+const genders = [
+  [0,"0 - Neutral"],[1,"1 - Male"],[2,"2 - Female"]
+];
+
+/* Good/Evil shortcuts (per your correction: Human, Dwarf, Centaur are neutral => excluded) */
+const goodAggroNames = ["Wood Elf","High Elf","Sprite","Faerie"];
+const evilAggroNames = ["Orc","Shadow Elf","Saurian","Minotaur","Lich","Troll","Goblin","Skaven","Elouve"];
+
+/* ANSI-like color code map (same scheme as Object Buddy) */
+const colorMap = {
+  "#R":"#800000","#G":"#008000","#B":"#000080","#T":"#808000","#U":"#800080","#C":"#008080",
+  "#S":"#C0C0C0","#D":"#808080","#O":"#FF0000","#E":"#00FF00","#L":"#0000FF","#Y":"#FFFF00",
+  "#P":"#FF00FF","#A":"#00FFFF","#W":"#FFFFFF","##":"#C0C0C0"
+};
+
+/* ========================
+   Utilities and builders
+   ======================== */
+
+function fillSelect(el, arr) {
+  el.innerHTML = "";
+  arr.forEach(([val,text])=>{
+    const o=document.createElement("option"); o.value=val; o.textContent=text; el.appendChild(o);
+  });
+}
+
+function buildCheckboxes(containerId, defs) {
+  const cont = document.getElementById(containerId);
+  defs.forEach(([val,name])=>{
+    const label=document.createElement("label");
+    const cb=document.createElement("input");
+    cb.type="checkbox"; cb.value=val;
+    cb.dataset.name=name.trim().toLowerCase();
+    label.appendChild(cb);
+    label.append(" "+name);
+    cont.appendChild(label);
+  });
+}
+
+function setFlagsFromString(containerId, flagStr) {
+  const set = new Set((flagStr||"0").split("|").filter(Boolean));
+  const cbs = document.querySelectorAll(`#${containerId} input[type="checkbox"]`);
+  cbs.forEach(cb => cb.checked = set.has(cb.value));
+}
+
+function collectFlags(containerId) {
+  const checked = Array.from(document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)).map(cb=>cb.value);
+  return checked.length ? checked.join("|") : "0";
+}
+
+function normalizeName(n){ return n.trim().toLowerCase(); }
+
+function selectAggroGroup(kind){
+  const names = kind==="good" ? goodAggroNames : evilAggroNames;
+  const wanted = new Set(names.map(normalizeName));
+  const cbs = document.querySelectorAll(`#aggroRaces input[type="checkbox"]`);
+  cbs.forEach(cb=>{
+    const label = cb.parentElement.textContent.trim();
+    if(wanted.has(normalizeName(label))) cb.checked = true;
+  });
+  updateAll();
+}
+function clearAggro(){
+  document.querySelectorAll(`#aggroRaces input[type="checkbox"]`).forEach(cb=>cb.checked=false);
+  updateAll();
+}
+
+/* Colorization */
+function colorizeLine(line){
+  let html="",current=colorMap["##"],i=0;
+  while(i<line.length){
+    if(line[i]==="#" && i+1<line.length){
+      const code=line[i]+line[i+1];
+      if(colorMap[code]){ current=colorMap[code]; i+=2; continue; }
+    }
+    if(line[i]==="~") break;
+    html+=`<span class="colorSpan" style="color:${current}">${line[i]}</span>`;
+    i++;
+  }
+  return html;
+}
+
+function updateColorPreview(){
+  const out=[]
+  const shortdesc=document.getElementById("shortdesc").value.trim();
+  const longdesc=document.getElementById("longdesc").value.trim();
+  const mobdesc=document.getElementById("mobdesc").value;
+
+  if(shortdesc) out.push(colorizeLine(shortdesc+"##"));
+  if(longdesc)  out.push(colorizeLine(longdesc+"##"));
+
+  if(mobdesc.trim()){
+    mobdesc.split(/\r?\n/).forEach((ln,i,arr)=>{
+      const line = (i===arr.length-1) ? (ln+"##") : ln;
+      out.push(line ? colorizeLine(line) : "<br>");
+    });
+  }
+
+  document.getElementById("colorOutput").innerHTML = out.join("<br>");
+}
+
+/* Validation helpers */
+function isDice(fmt){
+  return /^[0-9]+d[0-9]+\+[0-9]+$/.test(fmt.trim());
+}
+
+/* ========================
+   Populate form controls
+   ======================== */
+fillSelect(document.getElementById("attackType"), attackTypes);
+fillSelect(document.getElementById("mobRace"), mobRaces);
+fillSelect(document.getElementById("attackStrategy"), strategies);
+fillSelect(document.getElementById("loadedPos"), posOptions);
+fillSelect(document.getElementById("defaultPos"), posOptions);
+fillSelect(document.getElementById("gender"), genders);
+
+buildCheckboxes("actionFlags", actionFlagDefs);
+buildCheckboxes("affectFlags", affectFlagDefs);
+buildCheckboxes("secondaryFlags", secondaryFlagDefs);
+buildCheckboxes("aggroRaces", aggroRaceDefs);
+
+/* Defaults */
+document.getElementById("attackType").value = "107"; // Claw (like example)
+document.getElementById("mobRace").value = "1";
+document.getElementById("attackStrategy").value = "0";
+document.getElementById("loadedPos").value = "8";
+document.getElementById("defaultPos").value = "8";
+document.getElementById("gender").value = "0";
+
+/* ========================
+   Output generation
+   ======================== */
+function generateOutput(){
+  const msgs=[];
+  const vnum = (document.getElementById("vnum").value||"").trim();
+  const namelist = (document.getElementById("namelist").value||"").trim();
+  const shortdesc = (document.getElementById("shortdesc").value||"").trim();
+  const longdesc = (document.getElementById("longdesc").value||"").trim();
+  const mobdesc = document.getElementById("mobdesc").value || "";
+
+  const actionFlags = collectFlags("actionFlags");
+  const affectFlags = collectFlags("affectFlags");
+  const alignment = (document.getElementById("alignment").value||"").trim() || "300";
+  const type = "D";
+
+  const attackType = document.getElementById("attackType").value;
+  const mobRace = document.getElementById("mobRace").value;
+  const strategy = document.getElementById("attackStrategy").value;
+  const secondary = collectFlags("secondaryFlags");
+
+  const level = document.getElementById("level").value || 1;
+  const hitroll = document.getElementById("hitroll").value || 0;
+  const ac = document.getElementById("ac").value || 20;
+  const hpDice = (document.getElementById("hpDice").value||"").trim();
+  const damDice = (document.getElementById("damDice").value||"").trim();
+
+  const gold = document.getElementById("gold").value || 0;
+  const aggro = collectFlags("aggroRaces");
+
+  const loadedPos = document.getElementById("loadedPos").value;
+  const defaultPos = document.getElementById("defaultPos").value;
+  const gender = document.getElementById("gender").value;
+
+  if(!vnum) msgs.push("VNUM is required.");
+  if(!namelist) msgs.push("Name list is required (no ANSI).");
+  if(!shortdesc) msgs.push("Short description is required.");
+  if(!longdesc) msgs.push("Long description is required (single line).");
+  if(!isDice(hpDice)) msgs.push("HP Dice must be in format xdy+z (lowercase d).");
+  if(!isDice(damDice)) msgs.push("Damage Dice must be in format xdy+z (lowercase d).");
+
+  const msgDiv=document.getElementById("messages");
+  msgDiv.innerHTML="";
+  if(msgs.length){
+    msgs.forEach(m=>{ const p=document.createElement("div"); p.className="error"; p.textContent=m; msgDiv.appendChild(p); });
+  }
+
+  // Build output
+  let text="";
+  if(vnum) text += `#${vnum}\n`;
+  if(namelist) text += `${namelist}~\n`;
+  if(shortdesc) text += `${shortdesc}~\n`;
+  if(longdesc) text += `${longdesc}\n~\n`;
+
+  // Mobile description: multi-line; ends with "~" on its own following line
+  if(mobdesc.trim()){
+    text += mobdesc.replace(/\r/g,"") + "\n~\n";
+  } else {
+    text += "~\n";
+  }
+
+  text += `${actionFlags} ${affectFlags} ${alignment} ${type}\n`;
+  text += `${attackType} ${mobRace} ${strategy} ${secondary}\n`;
+  text += `${level} ${hitroll} ${ac} ${hpDice} ${damDice}\n`;
+  text += `${gold} ${aggro}\n`;
+  text += `${loadedPos} ${defaultPos} ${gender}\n`;
+
+  document.getElementById("output").value = text;
+  updateColorPreview();
+}
+
+/* ========================
+   Parser (Load From MOB)
+   ======================== */
+function loadFromText(){
+  const raw = document.getElementById("inputArea").value;
+  if(!raw.trim()){ alert("No text to load."); return; }
+  const lines = raw.split(/\r?\n/);
+  let idx=0;
+
+  const nextLine = ()=> idx<lines.length ? lines[idx++] : "";
+  const peekLine = ()=> idx<lines.length ? lines[idx] : "";
+  const nextNonEmptyTrim = ()=>{
+    while(idx<lines.length && lines[idx].trim()==="") idx++;
+    return idx<lines.length ? lines[idx++].trim() : "";
+  };
+
+  function stripTildeEnd(s){ return s.replace(/~\s*$/,""); }
+
+  // Reset form
+  ["vnum","namelist","shortdesc","longdesc","mobdesc","alignment","level","hitroll","ac","hpDice","damDice","gold"].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value = el.type==="number" ? "" : "";
+  });
+  document.querySelectorAll("#actionFlags input[type=checkbox],#affectFlags input[type=checkbox],#secondaryFlags input[type=checkbox],#aggroRaces input[type=checkbox]").forEach(cb=>cb.checked=false);
+
+  // Parse VNUM
+  let line = nextNonEmptyTrim();
+  if(line.startsWith("#")){
+    document.getElementById("vnum").value = line.slice(1).trim();
+    line = nextNonEmptyTrim();
+  }
+
+  // Name list line ends with ~ (same line)
+  document.getElementById("namelist").value = stripTildeEnd(line);
+
+  // Short desc ends with ~ (same line)
+  document.getElementById("shortdesc").value = stripTildeEnd(nextNonEmptyTrim());
+
+  // Long desc = one line, next line is "~"
+  const ldesc = nextNonEmptyTrim();
+  document.getElementById("longdesc").value = ldesc;
+  // optional next should be "~"
+  if(peekLine().trim()==="~") nextLine();
+
+  // Mobile desc: multi-line until a line with "~" alone
+  let mobdescLines = [];
+  while(idx<lines.length){
+    const p = peekLine();
+    if(p.trim()==="~"){ nextLine(); break; }
+    mobdescLines.push(nextLine().replace(/\r$/,""));
+  }
+  document.getElementById("mobdesc").value = mobdescLines.join("\n").replace(/^\n+|\n+$/g,"");
+
+  // Actions/Affects/Alignment/Type
+  const aaLine = nextNonEmptyTrim().split(/\s+/);
+  const actionStr = aaLine[0]||"0";
+  const affectStr = aaLine[1]||"0";
+  const align = aaLine[2]||"300";
+  // const type = aaLine[3]; // should be D
+  setFlagsFromString("actionFlags", actionStr);
+  setFlagsFromString("affectFlags", affectStr);
+  document.getElementById("alignment").value = align;
+
+  // Attack / Race / Strategy / Secondary
+  const arss = nextNonEmptyTrim().split(/\s+/);
+  document.getElementById("attackType").value = arss[0]||"100";
+  document.getElementById("mobRace").value = arss[1]||"1";
+  document.getElementById("attackStrategy").value = arss[2]||"0";
+  const secondaryStr = arss[3]||"0";
+  setFlagsFromString("secondaryFlags", secondaryStr);
+
+  // Level / Hitroll / AC / HP / DAM
+  const stats = nextNonEmptyTrim().split(/\s+/);
+  document.getElementById("level").value = stats[0]||"1";
+  document.getElementById("hitroll").value = stats[1]||"0";
+  document.getElementById("ac").value = stats[2]||"20";
+  document.getElementById("hpDice").value = stats[3]||"1d1+1";
+  document.getElementById("damDice").value = stats[4]||"1d1+1";
+
+  // Gold / Aggro
+  const ga = nextNonEmptyTrim().split(/\s+/);
+  document.getElementById("gold").value = ga[0]||"0";
+  setFlagsFromString("aggroRaces", ga[1]||"0");
+
+  // Positions / Gender
+  const pdg = nextNonEmptyTrim().split(/\s+/);
+  document.getElementById("loadedPos").value = pdg[0]||"8";
+  document.getElementById("defaultPos").value = pdg[1]||"8";
+  document.getElementById("gender").value = pdg[2]||"0";
+
+  generateOutput();
+}
+
+/* ========================
+   Misc controls
+   ======================== */
+function appendEndMarker(){
+  const out = document.getElementById("output");
+  let text = out.value || "";
+  if(!text.endsWith("\n")) text += "\n";
+  text += "#99999\n$~\n";
+  out.value = text;
+}
+
+function copyOutput(){
+  const output=document.getElementById("output");
+  output.select();
+  document.execCommand("copy");
+  alert("Output copied.");
+}
+
+function updateAll(){ generateOutput(); }
+
+/* Event wiring */
+document.getElementById("generateBtn").addEventListener("click", generateOutput);
+document.getElementById("loadBtn").addEventListener("click", loadFromText);
+document.getElementById("addEndBtn").addEventListener("click", appendEndMarker);
+document.getElementById("copyBtn").addEventListener("click", copyOutput);
+
+document.querySelectorAll("input, select, textarea").forEach(el=>{
+  el.addEventListener("input", updateAll);
+});
+
+/* Init */
+generateOutput();
+updateColorPreview();
+</script>
+</body>
+</html>

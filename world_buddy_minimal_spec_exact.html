@@ -1,0 +1,517 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>World Buddy — Minimal</title>
+<style>
+  /* Minimal, no fluff: simple left/right layout */
+  html,body{height:100%;margin:0;font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
+  .row{display:flex;height:100%}
+  .half{flex:1;display:flex;flex-direction:column;border-left:1px solid #ddd}
+  .half:first-child{border-left:0}
+  header{padding:8px 10px;border-bottom:1px solid #ddd;background:#f7f7f7}
+  main{flex:1;display:flex;flex-direction:column;padding:10px;gap:8px;overflow:auto}
+  label{display:inline-block;margin-right:8px}
+  input[type=number], input[type=text]{padding:4px 6px}
+  button{padding:6px 10px;cursor:pointer}
+  textarea{flex:1;min-height:280px;font:12px/1.4 ui-monospace,Consolas,Menlo,monospace}
+  .row2{display:flex;gap:8px;align-items:center}
+  .panel{border:1px solid #ddd;padding:8px}
+  .graph{border:1px solid #ccc;background:#fff;min-height:320px}
+  .muted{color:#666;font-size:12px}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="row">
+  <!-- LEFT: user input -->
+  <div class="half">
+    <header><strong>Input</strong></header>
+    <main>
+      <div class="row2">
+        <label>Zone number: <input id="zone" type="number" min="1" step="1" placeholder="e.g. 60"></label>
+        <button id="btnGen">Generate Template</button>
+        <button id="btnUndo" disabled>Undo</button>
+        <button id="btnTests">Run tests</button>
+      </div>
+
+      <div class="panel">
+        <div class="row2">
+          <span>Selected room VNUM:</span>
+          <input id="selectedV" type="number" style="width:110px" readonly>
+          <span class="muted">(click a circle in the graph)</span>
+        </div>
+        <div class="row2" style="margin-top:6px">
+          <button data-dir="0">Add North (D0)</button>
+          <button data-dir="1">Add East (D1)</button>
+          <button data-dir="2">Add South (D2)</button>
+          <button data-dir="3">Add West (D3)</button>
+          <button data-dir="4">Add Up (D4)</button>
+          <button data-dir="5">Add Down (D5)</button>
+        </div>
+        <div class="row2" style="margin-top:6px">
+          <label><input id="autoLink" type="checkbox"> Auto-link if target cell is occupied</label>
+        </div>
+        <div class="row2" style="margin-top:6px">
+          <div>
+            <div class="muted">Default room flags (apply to new rooms):</div>
+            <div id="flagsBox" class="muted" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px"></div>
+          </div>
+        </div>
+        <div class="row2" style="margin-top:6px">
+          <label>Default sector:
+            <select id="sectorSel"></select>
+          </label>
+        </div>
+        <div class="muted" style="margin-top:6px">If auto-link is checked and the target cell already has a room, the button will link to it (and add a reciprocal if free). If empty, a new room is created. If multiple rooms exist, you will be prompted to pick a VNUM or leave blank to create new. Defaults affect only newly created rooms; existing rooms are unchanged.</div>
+      </div>
+
+      <div>
+        <div class="muted" style="margin-bottom:4px">Zone graph</div>
+        <svg id="svg" class="graph" viewBox="-200 -200 400 400"></svg>
+      </div>
+      <div id="testout" class="muted"></div>
+    </main>
+  </div>
+
+  <!-- RIGHT: output -->
+  <div class="half">
+    <header>
+      <strong>World File Output</strong>
+      <button id="btnCopy" style="float:right">Copy to clipboard</button>
+    </header>
+    <main>
+      <textarea id="out" spellcheck="false" readonly></textarea>
+      <div class="muted">Format: Rooms are emitted in D0..D5 order, no blank lines before D/E, one blank line after S, sentinel at end.</div>
+    </main>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ===== Simple data model =====
+  const DIRS = {0:'north',1:'east',2:'south',3:'west',4:'up',5:'down'};
+  const OPP  = {0:2,1:3,2:0,3:1,4:5,5:4};
+  const VEC  = {0:[0,-1,0],1:[1,0,0],2:[0,1,0],3:[-1,0,0],4:[0,0,1],5:[0,0,-1]};
+
+  let zone = null;              // integer > 0
+  let nextVnum = null;          // monotonic increasing; never reuse (except via Undo restoring prior state)
+  const rooms = new Map();      // vnum -> { vnum, zone, flags:[], sector:int, title, long, exits: {0?:to,1?:to,...}, pos:[x,y,z] }
+  let selected = null;          // selected vnum for graph operations
+  const history = [];           // stack of previous states for Undo
+  // Defaults for new rooms
+  let defaultFlags = [];        // e.g., [3,17]
+  let defaultSector = 0;
+
+  // ===== UI refs =====
+  const zoneInput = document.getElementById('zone');
+  const btnGen = document.getElementById('btnGen');
+  const btnUndo = document.getElementById('btnUndo');
+  const btnTests = document.getElementById('btnTests');
+  const out = document.getElementById('out');
+  const svg = document.getElementById('svg');
+  const selV = document.getElementById('selectedV');
+  const btnCopy = document.getElementById('btnCopy');
+  const autoLink = document.getElementById('autoLink');
+  const testout = document.getElementById('testout');
+  const flagsBox = document.getElementById('flagsBox');
+  const sectorSel = document.getElementById('sectorSel');
+
+  // ===== Helpers =====
+  function makeRoom(vnum, pos){
+    return {
+      vnum,
+      zone,
+      flags: Array.isArray(defaultFlags) ? [...defaultFlags] : [],
+      sector: defaultSector,
+      title: 'TODO: Room Title',
+      long: '   TODO: Room Description', // three-space indent
+      exits: {}, // dir -> toVnum
+      pos: pos || [0,0,0]
+    };
+  }
+
+  function snapshot(){
+    // Deep clone minimal state
+    const state = {
+      zone,
+      nextVnum,
+      selected,
+      rooms: Array.from(rooms.values()).map(r=>({
+        vnum:r.vnum, zone:r.zone, flags:Array.isArray(r.flags)?[...r.flags]:[], sector:r.sector, title:r.title, long:r.long,
+        exits:Object.assign({}, r.exits), pos:[...r.pos]
+      }))
+    };
+    history.push(state);
+    btnUndo.disabled = false;
+  }
+
+  function restore(state){
+    rooms.clear();
+    zone = state.zone;
+    nextVnum = state.nextVnum;
+    selected = state.selected;
+    state.rooms.forEach(r=>{ rooms.set(r.vnum, {
+      vnum:r.vnum, zone:r.zone, flags:Array.isArray(r.flags)?[...r.flags]:[], sector:r.sector, title:r.title, long:r.long,
+      exits:Object.assign({}, r.exits), pos:[...r.pos]
+    }); });
+    zoneInput.disabled = !!zone;
+    selV.value = selected || '';
+    refreshOutput();
+    renderGraph();
+    btnUndo.disabled = history.length===0;
+  }
+
+  function addRoom(pos){
+    const v = nextVnum++;
+    const r = makeRoom(v, pos);
+    rooms.set(v, r);
+    return r;
+  }
+
+  function ensureExit(fromV, dir, toV){
+    const r = rooms.get(fromV); if(!r) return;
+    if(r.exits.hasOwnProperty(dir)) return; // already exists, do nothing
+    r.exits[dir] = toV;
+  }
+
+  function addNeighbor(baseV, dir){
+    const base = rooms.get(baseV); if(!base) return;
+    if(base.exits.hasOwnProperty(dir)) return; // one exit per direction
+    const v = VEC[dir];
+    const p = base.pos;
+    const targetPos = [p[0]+v[0], p[1]+v[1], p[2]+v[2]];
+
+    // Helper: find rooms already at targetPos
+    const candidates = findRoomsAtPos(targetPos);
+
+    // Decide: link vs create
+    if(autoLink && autoLink.checked && candidates.length>0){
+      let target = null;
+      if(candidates.length===1){
+        target = candidates[0];
+      } else {
+        const list = candidates.map(r=>r.vnum).sort((a,b)=>a-b);
+        const msg = 'Multiple rooms in target cell. Enter VNUM to link, or leave blank to create new:\n' + list.join(', ');
+        const resp = prompt(msg, '');
+        const pick = parseInt(resp,10);
+        if(Number.isFinite(pick) && list.includes(pick)){
+          target = rooms.get(pick);
+        }
+      }
+      if(target){
+        ensureExit(baseV, dir, target.vnum);
+        // add reciprocal if free; never override existing
+        const back = OPP[dir];
+        const t = rooms.get(target.vnum);
+        if(t && !t.exits.hasOwnProperty(back)) ensureExit(target.vnum, back, baseV);
+        return target.vnum;
+      }
+      // fallthrough to create new if no valid pick
+    }
+
+    // Create new room
+    const nr = addRoom(targetPos);
+    ensureExit(baseV, dir, nr.vnum);
+    ensureExit(nr.vnum, OPP[dir], baseV);
+    return nr.vnum;
+  }
+
+  function formatFlags(f){
+    if(Array.isArray(f)){
+      if(f.length===0) return '0';
+      const uniq = Array.from(new Set(f)).sort((a,b)=>a-b);
+      if(uniq.length===1) return '^'+uniq[0];
+      return uniq.map(n=>'^^'+n).join('|').replace(/\^\^/g,'^');
+    }
+    if(typeof f==='number') return f===0 ? '0' : String(f);
+    if(typeof f==='string') return f;
+    return '0';
+  }
+
+  function roomsToWorld(){
+    const keys = Array.from(rooms.keys()).sort((a,b)=>a-b);
+    const outLines = [];
+    for(const v of keys){
+      const r = rooms.get(v);
+      outLines.push('#'+v);
+      outLines.push(r.title+'~');
+      outLines.push(r.long); // already first line has three spaces
+      outLines.push('~');
+      const flagsField = formatFlags(r.flags);
+      outLines.push(r.zone + ' ' + flagsField + ' ' + r.sector);
+      // Exits in D0..D5 order
+      for(let d=0; d<=5; d++){
+        if(r.exits.hasOwnProperty(d)){
+          const to = r.exits[d];
+          outLines.push('D'+d);
+          outLines.push('A passage leads '+DIRS[d]+'.');
+          outLines.push('~');
+          outLines.push('~');
+          outLines.push('0 0 '+to);
+        }
+      }
+      outLines.push('S');
+      outLines.push(''); // blank line between rooms
+    }
+    outLines.push('#99999');
+    outLines.push('$~');
+    return outLines.join('\n')+'\n';
+  }
+
+  function findRoomsAtPos(pos){
+    const outArr=[]; for(const r of rooms.values()){ const q=r.pos; if(q[0]===pos[0] && q[1]===pos[1] && q[2]===pos[2]) outArr.push(r); }
+    return outArr;
+  }
+
+  function refreshOutput(){
+    out.value = String(roomsToWorld());
+  }
+
+  // ===== Graph (static SVG, no animations) =====
+  function renderGraph(){
+    while(svg.firstChild) svg.removeChild(svg.firstChild);
+    const nodes = Array.from(rooms.values());
+    if(nodes.length===0) return;
+    const CELL=22, OFFSET=4;
+
+    // Precompute collision buckets
+    const bucket = new Map();
+    for(const r of nodes){
+      const k = r.pos.join(',');
+      if(!bucket.has(k)) bucket.set(k, []);
+      bucket.get(k).push(r);
+    }
+
+    // Precompute rendered XY (with Z-based NW/SE offset) and collision offsets
+    const posMap = new Map(); // vnum -> {x,y}
+    const collMap = new Map(); // vnum -> {dx,dy}
+    const stepDiag = CELL/Math.SQRT2; // distance equal to one cardinal cell at 45°
+
+    for(const r of nodes){
+      // Base grid position
+      let bx = r.pos[0]*CELL;
+      let by = r.pos[1]*CELL;
+      // Z-based offset: Up = NW, Down = SE, magnitude equals one N step per layer
+      if(r.pos[2] > 0){ const k=r.pos[2]; bx -= stepDiag*k; by -= stepDiag*k; }
+      else if(r.pos[2] < 0){ const k=-r.pos[2]; bx += stepDiag*k; by += stepDiag*k; }
+
+      // Collision spiral (Option B)
+      const list = bucket.get(r.pos.join(','));
+      const idx = list.indexOf(r);
+      let cdx=0, cdy=0;
+      if(list.length>1 && idx>0){
+        const baseR=2, stepR=1.5, stepAng=Math.PI/4; // 45° per collidee
+        const k = idx; // 1..n-1
+        const rad = baseR + (k-1)*stepR;
+        const ang = (k-1)*stepAng;
+        cdx = Math.cos(ang)*rad;
+        cdy = Math.sin(ang)*rad;
+      }
+      posMap.set(r.vnum, {x: bx + cdx, y: by + cdy});
+      collMap.set(r.vnum, {dx: cdx, dy: cdy});
+    }
+
+    // Compute bounding box from rendered positions
+    const xs = nodes.map(r=>posMap.get(r.vnum).x), ys = nodes.map(r=>posMap.get(r.vnum).y);
+    const minX = Math.min.apply(null, xs)-28, maxX = Math.max.apply(null, xs)+28;
+    const minY = Math.min.apply(null, ys)-28, maxY = Math.max.apply(null, ys)+28;
+    svg.setAttribute('viewBox', `${minX} ${minY} ${maxX-minX} ${maxY-minY}`);
+
+    // Draw links using rendered positions (so lines meet circles)
+    for(const r of nodes){
+      const p1 = posMap.get(r.vnum);
+      for(const d in r.exits){
+        const to = rooms.get(r.exits[d]); if(!to) continue;
+        const p2 = posMap.get(to.vnum);
+        const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.setAttribute('x1',p1.x); line.setAttribute('y1',p1.y);
+        line.setAttribute('x2',p2.x); line.setAttribute('y2',p2.y);
+        line.setAttribute('stroke','#999'); line.setAttribute('stroke-width','0.25');
+        svg.appendChild(line);
+      }
+    }
+
+    // Draw nodes
+    for(const r of nodes){
+      const p = posMap.get(r.vnum);
+      const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+      g.setAttribute('transform',`translate(${p.x},${p.y})`);
+      const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      c.setAttribute('r','2.5'); c.setAttribute('fill', r.vnum===selected?'#2a7':'#58a'); c.setAttribute('stroke','#134'); c.setAttribute('stroke-width','0.25');
+      const t=document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('y','-3.5'); t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','3'); t.textContent = r.vnum;
+      g.appendChild(c); g.appendChild(t);
+      g.style.cursor='pointer';
+      g.addEventListener('click',()=>{ selected=r.vnum; selV.value=r.vnum; renderGraph(); });
+      svg.appendChild(g);
+    }
+  }
+
+  // ===== Actions =====
+  btnGen.addEventListener('click', ()=>{
+    const z = parseInt(zoneInput.value,10);
+    if(!Number.isFinite(z) || z<=0) return;
+    // ensure defaults reflect current UI selections
+    syncDefaultsFromUI();
+    // snapshot state before mutation (allows undo back to pre-gen)
+    snapshot();
+    // Initialize fresh model
+    zone = z;
+    nextVnum = z*100; // first allocation will bump to zone*100, so create explicitly now
+    rooms.clear();
+    const first = addRoom([0,0,0]); // creates zone*100
+    selected = first.vnum; selV.value = selected;
+    // lock zone input (grey out)
+    zoneInput.disabled = true;
+    // output & graph
+    refreshOutput();
+    renderGraph();
+  });
+
+  // Direction buttons
+  document.querySelectorAll('[data-dir]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!selected) return;
+      const dir = parseInt(btn.getAttribute('data-dir'),10);
+      const base = rooms.get(selected);
+      if(!base) return;
+      if(base.exits.hasOwnProperty(dir)) return; // already has exit in that direction
+      // snapshot before mutation so Undo removes the newly added room/links and restores nextVnum
+      snapshot();
+      addNeighbor(selected, dir);
+      refreshOutput();
+      renderGraph();
+    });
+  });
+
+  // Copy
+  btnCopy.addEventListener('click', async ()=>{
+    try{
+      const text = String(out.value || '');
+      await navigator.clipboard.writeText(text);
+      btnCopy.textContent='Copied!'; setTimeout(()=>btnCopy.textContent='Copy to clipboard',1000);
+    }catch(e){
+      try{
+        out.select(); document.execCommand('copy');
+        btnCopy.textContent='Copied!'; setTimeout(()=>btnCopy.textContent='Copy to clipboard',1000);
+      }catch(err){
+        console.error('Copy failed', err);
+      }
+    }
+  });
+
+  // Undo
+  btnUndo.addEventListener('click', ()=>{
+    if(history.length===0) return;
+    const prev = history.pop();
+    restore(prev);
+  });
+
+  // ===== Flags/Sector defaults UI =====
+  const FLAG_OPTS = [
+    {n:0, label:'Dark'},
+    {n:1, label:'Death'},
+    {n:2, label:'No Mob'},
+    {n:3, label:'Indoors'},
+    {n:7, label:'No Magic'},
+    {n:9, label:'Private'},
+    {n:10, label:'God Room'},
+    {n:12, label:'Imp Only'},
+    {n:13, label:'No Recall'},
+    {n:14, label:'Healing'},
+    {n:15, label:'No Trans'},
+    {n:17, label:'Light'},
+    {n:18, label:'Silent'},
+    {n:19, label:'Fog'},
+    {n:20, label:'Tiny'},
+    {n:21, label:'Limited'}
+  ];
+
+  function renderFlagControls(){
+    if(!flagsBox) return;
+    flagsBox.innerHTML='';
+    FLAG_OPTS.forEach(opt=>{
+      const id = 'f_'+opt.n;
+      const w = document.createElement('label');
+      w.style.display='inline-flex'; w.style.alignItems='center'; w.style.gap='4px';
+      w.innerHTML = `<input type="checkbox" id="${id}"><span>^${opt.n} ${opt.label}</span>`;
+      flagsBox.appendChild(w);
+      const cb = w.querySelector('input');
+      cb.addEventListener('change', syncDefaultsFromUI);
+    });
+  }
+
+  function renderSectorOptions(){
+    if(!sectorSel) return;
+    const SECTORS = [
+      [0,'Inside'],[1,'City Streets'],[2,'Field'],[3,'Forest'],[4,'Hills'],[5,'Mountain'],[6,'Water, shallow'],[7,'Water, need boat'],[8,'No Ground, needs fly'],[9,'Peace Room'],[10,'Underwater'],[11,'Fire Plane'],[12,'Ocean (not used)'],[13,'Earth Room'],[14,'In Object'],[15,'Arena (Do Not Use)'],[16,'Cave'],[17,'Astral'],[18,'Cold'],[19,'Desert'],[20,'Steep mountain']
+    ];
+    sectorSel.innerHTML='';
+    SECTORS.forEach(([val,label])=>{
+      const opt=document.createElement('option');
+      opt.value=String(val); opt.textContent = `${val} — ${label}`;
+      sectorSel.appendChild(opt);
+    });
+    sectorSel.value='0';
+    defaultSector = 0;
+  }
+
+  function syncDefaultsFromUI(){
+    // Flags
+    const arr=[]; FLAG_OPTS.forEach(opt=>{ const cb=document.getElementById('f_'+opt.n); if(cb && cb.checked) arr.push(opt.n); });
+    arr.sort((a,b)=>a-b); defaultFlags = arr;
+    // Sector
+    const s = parseInt(sectorSel && sectorSel.value,10); defaultSector = Number.isFinite(s)? s : 0;
+  }
+
+  renderFlagControls();
+  renderSectorOptions();
+  // keep defaults live when the dropdown changes
+  if(sectorSel) sectorSel.addEventListener('change', syncDefaultsFromUI);
+  syncDefaultsFromUI();
+
+  // ===== Minimal Tests =====
+  btnTests.addEventListener('click', ()=>{
+    const logs=[]; const ok=(name,cond)=>logs.push((cond?'✔ ':'✖ ')+name);
+
+    // Test 1: prompt string assembly uses \n (no syntax errors)
+    try{
+      const s = 'Multiple rooms...\n' + ['6000','6001'].join(', ');
+      ok('prompt string newline ok', /6000, 6001$/.test(s));
+    }catch(_){ ok('prompt string newline ok', false); }
+
+    // Test 2: flags formatting
+    try{
+      ok('flags none → 0', formatFlags([])==='0');
+      ok('flags single → ^3', formatFlags([3])==='^3');
+      ok('flags multi sorted → ^3|^17', formatFlags([17,3])==='^3|^17');
+    }catch(_){ ok('flags formatting block executed', false); }
+
+    // Test 3: sector default updates from UI and applies to new rooms
+    try{
+      const prev = defaultSector;
+      if(sectorSel){ sectorSel.value = '2'; }
+      syncDefaultsFromUI();
+      ok('sectorSel change updates defaultSector → 2', defaultSector===2);
+      const tmp = makeRoom(12345,[0,0,0]);
+      ok('makeRoom uses current defaultSector', tmp.sector===2);
+      // restore prior
+      if(sectorSel){ sectorSel.value = String(prev); }
+      syncDefaultsFromUI();
+    }catch(_){ ok('sector default wiring ok', false); }
+
+    // Test 4: output ends with newline and $~ sentinel
+    try{
+      const text = roomsToWorld();
+      ok('output ends with newline', text.endsWith('\n'));
+      const lines = text.split('\n');
+      const lastLine = lines[lines.length-2]; // because there is a trailing newline
+      ok('ends with $~ sentinel', lastLine === '$~');
+    }catch(_){ ok('output newline/sentinel checks', false); }
+
+    testout.textContent = logs.join('\n');
+  });
+})();
+</script>
+</body>
+</html>

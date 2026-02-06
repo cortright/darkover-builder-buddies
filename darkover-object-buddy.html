@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Darkover Object Buddy — Alpha+6</title>
+<style>
+  body { margin: 0; font-family: sans-serif; background-color: #d3d3d3; }
+  header { padding: 10px; font-size: 24px; font-weight: bold; }
+  #messages { padding: 10px; min-height: 20px; }
+  .error { color: red; }
+  .success { color: green; }
+  .warning { color: orange; }
+  .container { display: flex; height: calc(100vh - 80px); padding: 10px; box-sizing: border-box; }
+  .left, .right { flex: 1; padding: 10px; box-sizing: border-box; overflow-y: auto; }
+  textarea#output, .colorOutput, #inputArea {
+    width: 100%;
+    background: black;
+    color: white;
+    font-family: monospace;
+    resize: none;
+    padding: 5px;
+    box-sizing: border-box;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    position: relative;
+  }
+  /* Heights tuned for a comfortable layout */
+  textarea#output { height: 28%; }
+  #inputArea { height: 14%; margin-top: 6px; }
+  .colorOutput { margin-top: 5px; pointer-events: none; height: 28%; background: #111; }
+  button { margin-top: 5px; padding: 5px 10px; }
+  .group { margin-bottom: 10px; padding: 5px; border: 1px solid #999; background: #f0f0f0; }
+  .group label { display: block; font-weight: bold; margin-bottom: 4px; }
+  .checkbox-group { display: flex; flex-wrap: wrap; }
+  .checkbox-group label { margin-right: 10px; font-weight: normal; }
+  input[type="text"], input[type="number"], select { width: 100%; box-sizing: border-box; margin-bottom: 5px; }
+  .colorSpan { font-family: monospace; }
+  .extraDescGroup, .sSectionGroup, .aSectionGroup { margin-bottom: 10px; border: 1px solid #666; padding: 5px; background: #e0e0e0; }
+  .inline-inputs { display: flex; gap: 10px; }
+  .inline-inputs input { width: 16ch; } /* your preferred width */
+  .toggle-buttons { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px; }
+
+  /* Blue tooltip underline cue for ANY label carrying a title attribute */
+  label[title] {
+    text-decoration: underline;
+    text-decoration-color: #0066ff;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    cursor: help;
+  }
+
+  /* Val help panel */
+  .val-help { font-size: 0.9em; background: #fff; border: 1px solid #999; padding: 4px; margin-top: 5px; }
+  .val-help table { width: 100%; border-collapse: collapse; }
+  .val-help th, .val-help td { border: 1px solid #ccc; padding: 2px 4px; text-align: left; }
+</style>
+</head>
+<body>
+<header>Darkover Object Buddy</header>
+<div id="messages"></div>
+<div class="container">
+  <div class="left">
+    <!-- Main Object Fields -->
+    <div class="group">
+      <label>Object VNUM</label>
+      <input type="number" id="vnum" min="1">
+    </div>
+    <div class="group">
+      <label>Keywords</label>
+      <input type="text" id="keywords">
+    </div>
+    <div class="group">
+      <label>Short Description</label>
+      <input type="text" id="shortdesc">
+    </div>
+    <div class="group">
+      <label>Long Description</label>
+      <input type="text" id="longdesc">
+    </div>
+    <div class="group">
+      <label title="$p is the object
+$n is the wearer of the object
+$N is the opponent">Wear Message</label>
+      <textarea id="wearmsg" style="width:100%; height:60px;"></textarea>
+    </div>
+    <div class="group">
+      <label>Object Type</label>
+      <select id="objtype">
+        <option value="1">1 - Light Source</option>
+        <option value="2">2 - Scroll</option>
+        <option value="3">3 - Wand</option>
+        <option value="4">4 - Staff</option>
+        <option value="5">5 - Weapon</option>
+        <option value="8">8 - Treasure</option>
+        <option value="9">9 - Armor</option>
+        <option value="10">10 - Potion</option>
+        <option value="11">11 - Worn</option>
+        <option value="12">12 - Other</option>
+        <option value="13">13 - Trash</option>
+        <option value="15">15 - Container</option>
+        <option value="17">17 - Drink Container</option>
+        <option value="18">18 - Key</option>
+        <option value="19">19 - Food</option>
+        <option value="20">20 - Money</option>
+        <option value="23">23 - Fountain</option>
+        <option value="24">24 - Portal</option>
+        <option value="25">25 - Herb</option>
+      </select>
+    </div>
+    <div class="group">
+      <label>Object Flags</label>
+      <div class="checkbox-group" id="objflags"></div>
+    </div>
+    <div class="group">
+      <label>Wear Flags</label>
+      <div class="checkbox-group" id="wearflags"></div>
+    </div>
+    <div class="group">
+      <label>Anti Races</label>
+      <div class="checkbox-group" id="antiraces"></div>
+      <div class="toggle-buttons">
+        <button type="button" onclick="toggleAntiRaces('goods')">Goods</button>
+        <button type="button" onclick="toggleAntiRaces('evils')">Evils</button>
+      </div>
+    </div>
+    <div class="group">
+      <label>Anti Classes</label>
+      <div class="checkbox-group" id="anticlasses"></div>
+      <div class="toggle-buttons">
+        <button type="button" onclick="toggleAntiClasses('arcane')">Arcane</button>
+        <button type="button" onclick="toggleAntiClasses('arcaneHybrid')">Arcane Hybrid</button>
+        <button type="button" onclick="toggleAntiClasses('divine')">Divine</button>
+        <button type="button" onclick="toggleAntiClasses('divineHybrid')">Divine Hybrid</button>
+        <button type="button" onclick="toggleAntiClasses('nature')">Nature</button>
+        <button type="button" onclick="toggleAntiClasses('natureHybrid')">Nature Hybrid</button>
+        <button type="button" onclick="toggleAntiClasses('tank')">Tank</button>
+        <button type="button" onclick="toggleAntiClasses('hitter')">Hitter</button>
+      </div>
+    </div>
+    <div class="group">
+      <label>Values</label>
+      <div class="inline-inputs">
+        <input type="number" id="val0" placeholder="val0">
+        <input type="number" id="val1" placeholder="val1">
+        <input type="number" id="val2" placeholder="val2">
+        <input type="number" id="val3" placeholder="val3">
+      </div>
+      <div id="valHelp" class="val-help"></div>
+    </div>
+    <div class="group">
+      <label>Minimum Stats</label>
+      <div class="inline-inputs">
+        <input type="number" id="mindex" placeholder="min-dex">
+        <input type="number" id="minint" placeholder="min-int">
+        <input type="number" id="minwis" placeholder="min-wis">
+      </div>
+    </div>
+    <div class="group">
+      <label>Extra Flags</label>
+      <div class="checkbox-group" id="extraflags"></div>
+    </div>
+    <div class="group">
+      <label>Affect Bits</label>
+      <div class="checkbox-group" id="affectbits"></div>
+    </div>
+    <div class="group">
+      <label>Weight / Gold / Maxload</label>
+      <div class="inline-inputs">
+        <input type="number" id="weight" value="0" placeholder="Weight">
+        <input type="number" id="gold" value="0" placeholder="Gold">
+        <input type="number" id="maxload" value="0" placeholder="Maxload">
+      </div>
+    </div>
+
+    <!-- Extra Descriptions -->
+    <div class="group">
+      <label>Extra Descriptions (E)</label>
+      <div id="extraDescriptionsContainer"></div>
+      <button id="addExtraDesc">Add Extra Description</button>
+    </div>
+
+    <!-- S Sections -->
+    <div class="group">
+      <label title="$p is the object
+$n is the wearer of the object
+$N is the opponent">S Sections</label>
+      <div id="sSectionsContainer"></div>
+      <button id="addSSection">Add S Section</button>
+    </div>
+
+    <!-- A Sections -->
+    <div class="group">
+      <label title="Apply types:
+1 = Str
+2 = Dex
+3 = Int
+4 = Wis
+5 = Con
+12 = GenMana
+13 = HP
+14 = Move
+17 = Armor
+18 = Hitroll
+19 = Damroll
+20 = SaveParalysis
+21 = SaveRod
+22 = SavePetrify
+23 = SaveBreath
+24 = SaveSpell
+25 = Gives Spell
+26 = Mage Mana
+27 = Cleric Mana
+28 = Nature Mana">A Sections</label>
+      <div id="aSectionsContainer"></div>
+      <button id="addASection">Add A Section</button>
+    </div>
+
+  </div>
+
+  <div class="right">
+    <label title="Read-only generated output">Generated Output</label>
+    <textarea id="output" readonly></textarea>
+    <button id="copyBtn">Copy to Clipboard</button>
+    <button id="loadBtn">Load From Text</button>
+    <label title="Paste a raw object definition here, then click &quot;Load From Text&quot;.">Input (Paste to Load)</label>
+    <textarea id="inputArea" placeholder="Paste object text here"></textarea>
+    <div id="colorOutput" class="colorOutput"></div>
+  </div>
+</div>
+
+<script>
+/*========================
+ Value help mapping (val0–val3 meanings by object type)
+========================*/
+const objectTypeHelp = {
+  1:  ["val0: not used", "val1: not used", "val2: Hours of light available (0=dead, -1=infinite)", "val3: not used"],
+  2:  ["val0: Spell level", "val1: Spell #1 (-1 if unused)", "val2: Spell #2 (-1 if unused)", "val3: Spell #3 (-1 if unused)"],
+  3:  ["val0: Spell level", "val1: Max charges", "val2: Charges on boot", "val3: Spell #"],
+  4:  ["val0: Spell level", "val1: Max charges", "val2: Charges on boot", "val3: Spell #"],
+  5:  ["val0: not used", "val1: Damage dice count", "val2: Damage dice size", "val3: Weapon type (2=Whip,3=Slash,4=Missile,5=Cleave,6=Crush,7=Pound,11=Pierce,12=Lance)"],
+  8:  ["val0: not used", "val1: not used", "val2: not used", "val3: not used"],
+  9:  ["val0: Armor Value (AV)", "val1: not used", "val2: not used", "val3: not used"],
+  10: ["val0: Spell level", "val1: Spell #1 (-1 if unused)", "val2: Spell #2 (-1 if unused)", "val3: Spell #3 (-1 if unused)"],
+  11: ["val0: not used", "val1: not used", "val2: not used", "val3: not used"],
+  12: ["val0: not used", "val1: not used", "val2: not used", "val3: not used"],
+  13: ["val0: not used", "val1: not used", "val2: not used", "val3: not used"],
+  15: ["val0: Weight capacity", "val1: Container flags (1=closable,2=pickproof,4=closed,8=locked; add)", "val2: Key VNUM (-1 if none)", "val3: not used"],
+  17: ["val0: Max drink units", "val1: Amount at boot", "val2: Liquid type", "val3: Poison strength (initial damage)"],
+  18: ["val0: Must equal object VNUM", "val1: not used", "val2: not used", "val3: not used"],
+  19: ["val0: Hours of food", "val1: Spell level", "val2: Spell # (-1 if unused)", "val3: Poison strength (initial damage)"],
+  20: ["val0: Gold pieces", "val1: not used", "val2: not used", "val3: not used"],
+  23: ["val0: Max drink units (-1=continuous)", "val1: Amount at boot (-1=continuous)", "val2: Liquid type", "val3: Poison strength (initial damage)"],
+  24: ["val0: Destination room VNUM", "val1: Timer dice count (or fixed if y=0)", "val2: Timer dice size", "val3: not used"],
+  25: ["val0: Spell level", "val1: Spell #1 (-1 if unused)", "val2: Spell #2 (-1 if unused)", "val3: Spell #3 (-1 if unused)"]
+};
+function updateValHelp() {
+  const type = document.getElementById("objtype").value;
+  const help = objectTypeHelp[type];
+  const container = document.getElementById("valHelp");
+  if (!help) { container.innerHTML = ""; return; }
+  let html = "<table><tr><th>Field</th><th>Meaning</th></tr>";
+  help.forEach(h => {
+    const idx = h.indexOf(":");
+    const left = idx >= 0 ? h.slice(0, idx).trim() : h;
+    const right = idx >= 0 ? h.slice(idx+1).trim() : "";
+    html += `<tr><td>${left}</td><td>${right}</td></tr>`;
+  });
+  html += "</table>";
+  container.innerHTML = html;
+}
+document.getElementById("objtype").addEventListener("change", updateValHelp);
+
+/*========================
+ Flag definitions
+========================*/
+const objFlags = [["^0","Glow"],["^1","Hum"],["^2","Dark"],["^3","Light"],["^4","Evil"],["^5","Invis"],["^6","Magic"],["^7","Nodrop"],["^8","Bless"],["^12","!Rent"],["^13","!Frag"],["^14","!Invis"],["^15","!Sell"],["^29","Hidden"],["^30","2-Handed"]];
+const wearFlags = [["^0","Take"],["^1","Finger"],["^2","Neck"],["^3","Body"],["^4","Head"],["^5","Legs"],["^6","Feet"],["^7","Hands"],["^8","Trinket"],["^9","Shield"],["^10","About body"],["^11","Waist"],["^12","Jewelry"],["^13","Wield"],["^14","Hold"],["^15","Wrist"],["^16","Face"]];
+const antiRaces = [["^1","!Human"],["^2","!Dwarf"],["^3","!WoodElf"],["^5","!HighElf"],["^6","!Sprite"],["^7","!ShadowElf"],["^8","!Orc"],["^9","!Saurian"],["^10","!Minotaur"],["^11","!Lich"],["^12","!Faerie"],["^13","!Troll"],["^14","!Centaur"],["^15","!Goblin"],["^16","!Gnomes"],["^17","!Kyri"],["^18","!Skaven"],["^19","!Elouve"]];
+const antiClasses = [["^1","!Mage"],["^2","!Cleric"],["^3","!Dark Priest"],["^4","!Warrior"],["^5","!Archon"],["^6","!Wardancer"],["^7","!Sprite"],["^8","!Monk"],["^9","!Ranger"],["^10","!Paladin"],["^11","!Druid"],["^12","!Necromancer"],["^13","!Trollslayer"],["^14","!Saurian"],["^15","!Berserker"],["^16","!Rogue"],["^17","!Witch"],["^18","!Fire Archon"],["^19","!Mercenary"],["^20","!Knight"],["^21","!Dark Paladin"],["^22","!Templar"],["^23","!Shaman"],["^24","!Thane"],["^25","!Elementalist"],["^26","!Bard"],["^27","!Demarche"],["^28","!Assassin"],["^29","!Water Archon"],["^30","!Earth Archon"],["^31","!Air Archon"]];
+const extraFlags = [["^1","drop-die"],["^2","!id"],["^4","transform"]];
+const affectBits = [["^0","Blind"],["^1","Invisible"],["^3","Det Invis"],["^4","Det Magic"],["^5","Sense Life"],["^7","Sanctuary"],["^10","No Summon"],["^11","Poison"],["^14","No Invis"],["^15","No Charm"],["^18","Sneak"],["^19","Hide"],["^20","Fear"],["^24","Night Vision"],["^25","Aware"],["^26","Fly"],["^27","Haste"],["^28","FaerieFire"],["^29","Regen"],["^30","!Regen"]];
+
+/*========================
+ Checkbox builder + name normalization
+========================*/
+function normalizeName(name){
+  return name.replace(/^!/, '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+function makeCheckboxes(containerId, data){
+  const container=document.getElementById(containerId);
+  data.forEach(([val,labelText])=>{
+    const wrap=document.createElement("label");
+    const cb=document.createElement("input");
+    cb.type="checkbox";
+    cb.value=val;
+    cb.dataset.name = normalizeName(labelText);
+    wrap.appendChild(cb);
+    wrap.append(" "+labelText);
+    container.appendChild(wrap);
+  });
+}
+makeCheckboxes("objflags", objFlags);
+makeCheckboxes("wearflags", wearFlags);
+makeCheckboxes("antiraces", antiRaces);
+makeCheckboxes("anticlasses", antiClasses);
+makeCheckboxes("extraflags", extraFlags);
+makeCheckboxes("affectbits", affectBits);
+
+/*========================
+ Toggle helpers (group on/off)
+========================*/
+function toggleGroup(containerId, names){
+  const wanted = names.map(n => normalizeName(n));
+  const inputs = Array.from(document.querySelectorAll(`#${containerId} input[type="checkbox"]`))
+                      .filter(cb => wanted.includes(cb.dataset.name));
+  if(inputs.length === 0){ updateOutput(); return; }
+  const shouldCheck = inputs.some(cb => !cb.checked); // if any unchecked -> all on; else -> all off
+  inputs.forEach(cb => { cb.checked = shouldCheck; });
+  updateOutput();
+}
+function toggleAntiRaces(group){
+  const map = {
+    goods: ["WoodElf","HighElf","Sprite","Faerie","Kyri","Elouve"],
+    evils: ["ShadowElf","Orc","Saurian","Minotaur","Lich","Troll","Goblin","Skaven"]
+  };
+  toggleGroup("antiraces", map[group] || []);
+}
+function toggleAntiClasses(group){
+  const map = {
+    arcane: ["Mage","Elementalist","Necromancer","Sprite"],
+    arcaneHybrid: ["Witch","Archon","Air Archon","Fire Archon","Water Archon","Earth Archon"],
+    divine: ["Cleric","Dark Priest"],
+    divineHybrid: ["Paladin","Dark Paladin","Templar","Thane","Demarche"],
+    nature: ["Druid","Shaman"],
+    natureHybrid: ["Ranger","Bard"],
+    tank: ["Warrior","Knight","Saurian","Trollslayer"],
+    hitter: ["Wardancer","Monk","Berserker","Rogue","Mercenary","Assassin"]
+  };
+  toggleGroup("anticlasses", map[group] || []);
+}
+
+/*========================
+ Helper functions
+========================*/
+function makeCheckboxesValueSetter(containerId, valStr){
+  const vals = (valStr || "0").split("|").filter(Boolean);
+  const set = new Set(vals);
+  document.querySelectorAll(`#${containerId} input[type="checkbox"]`).forEach(cb=>{
+    cb.checked = set.has(cb.value);
+  });
+}
+function collectFlags(containerId){
+  const cbs=document.querySelectorAll("#"+containerId+" input:checked");
+  if(cbs.length===0) return "0";
+  return Array.from(cbs).map(cb=>cb.value).join("|");
+}
+function nextNonEmpty(lines, idx){
+  while(idx < lines.length && lines[idx].trim() === "") idx++;
+  return idx;
+}
+
+/*========================
+ Colorization
+========================*/
+const colorMap = {"#R":"#800000","#G":"#008000","#B":"#000080","#T":"#808000","#U":"#800080","#C":"#008080","#S":"#C0C0C0","#D":"#808080","#O":"#FF0000","#E":"#00FF00","#L":"#0000FF","#Y":"#FFFF00","#P":"#FF00FF","#A":"#00FFFF","#W":"#FFFFFF","##":"#C0C0C0"};
+function colorizeLine(line){
+  let html="",currentColor=colorMap["##"],i=0;
+  while(i<line.length){
+    if(line[i]==="#" && i+1<line.length){
+      const code=line[i]+line[i+1];
+      if(colorMap[code]){currentColor=colorMap[code]; i+=2; continue;}
+    }
+    if(line[i]==="~") break;
+    html+=`<span class="colorSpan" style="color:${currentColor}">${line[i]}</span>`;
+    i++;
+  }
+  return html;
+}
+function stripColorCodes(line){
+  return line.replace(/#[A-Z]/g,"").replace(/~/g,"");
+}
+
+/*========================
+ Update color preview
+========================*/
+function updateColorOutput(){
+  let lines=[];
+  // short, long
+  ["shortdesc","longdesc"].forEach(id=>{
+    const val=document.getElementById(id).value.trim();
+    if(val) lines.push(val.endsWith("~")? val : val+"##");
+  });
+  // wear message preview (each non-empty line colored; blank lines show as breaks)
+  const wearRaw = document.getElementById("wearmsg").value;
+  if(wearRaw.trim()){
+    wearRaw.split(/\r?\n/).forEach(line=>{
+      const v=line; // do not trim to keep leading spaces if any
+      if(v) lines.push(v.endsWith("~")? v : v+"##");
+      else  lines.push("");
+    });
+  }
+  // Extra Descriptions
+  document.querySelectorAll(".extraDescGroup").forEach(group=>{
+    let desc=group.querySelector(".edText").value;
+    if(desc.trim()){
+      desc.split(/\r?\n/).forEach((ln,i,arr)=>{
+        const out = (i===arr.length-1) ? (ln.endsWith("~")?ln:ln+"##") : ln;
+        lines.push(out);
+      });
+    }
+  });
+  // S Sections messages
+  document.querySelectorAll(".sSectionGroup").forEach(group=>{
+    ["firstMsg","secondMsg","thirdMsg"].forEach(cls=>{
+      let val=group.querySelector("."+cls).value.trim();
+      if(val) lines.push(val.endsWith("~")? val : val+"##");
+    });
+  });
+  const colorHtml=lines.map(l => l ? colorizeLine(l) : "<br>").join("<br>");
+  document.getElementById("colorOutput").innerHTML=colorHtml;
+}
+
+/*========================
+ Update Output
+========================*/
+function updateOutput(){
+  const messages=[];
+  const vnum=document.getElementById("vnum").value.trim();
+  const keywords=document.getElementById("keywords").value.trim();
+  const shortdesc=document.getElementById("shortdesc").value.trim();
+  const longdesc=document.getElementById("longdesc").value.trim();
+  const wearmsgRaw=document.getElementById("wearmsg").value; // allow multiline
+  const objtype=document.getElementById("objtype").value;
+  const val0=document.getElementById("val0").value||0;
+  const val1=document.getElementById("val1").value||0;
+  const val2=document.getElementById("val2").value||0;
+  const val3=document.getElementById("val3").value||0;
+  const mindex=document.getElementById("mindex").value||0;
+  const minint=document.getElementById("minint").value||0;
+  const minwis=document.getElementById("minwis").value||0;
+  const weight=document.getElementById("weight").value||0;
+  const gold=document.getElementById("gold").value||0;
+  const maxload=document.getElementById("maxload").value||0;
+
+  if(/[^\w ]/.test(keywords)) messages.push("Warning: Keywords contain punctuation or numbers.");
+  if(maxload!=0) messages.push("Warning: Setting maxload is almost always a stupid thing to do, are you sure?");
+
+  const objflagsVal=collectFlags("objflags");
+  const wearflagsVal=collectFlags("wearflags");
+  const antiracesVal=collectFlags("antiraces");
+  const anticlassesVal=collectFlags("anticlasses");
+  const extraflagsVal=collectFlags("extraflags");
+  const affectbitsVal=collectFlags("affectbits");
+
+  let text="";
+  if(vnum) text+="#"+vnum+"\n";
+  if(keywords) text+=keywords+"~\n";
+  if(shortdesc) text+=shortdesc+"~\n";
+  if(longdesc) text+=longdesc+"~\n";
+
+  // Wear message block: multi-line supported, ONLY the last line ends with "~"
+  if(wearmsgRaw.trim() === ""){
+    text+="~\n";
+  } else {
+    const lines = wearmsgRaw.split(/\r?\n/);
+    if(lines.length === 1){
+      const only = lines[0];
+      text += (only.endsWith("~") ? only : only + "~") + "\n";
+    } else {
+      for(let i=0;i<lines.length;i++){
+        const rawLine = lines[i];
+        if(i === lines.length - 1){
+          text += (rawLine.endsWith("~") ? rawLine : rawLine + "~") + "\n";
+        } else {
+          text += rawLine + "\n"; // intermediate lines: NO tilde
+        }
+      }
+    }
+  }
+
+  text+=`${objtype} ${objflagsVal} ${wearflagsVal} ${antiracesVal} ${anticlassesVal}\n`;
+  text+=`${val0} ${val1} ${val2} ${val3}\n`;
+  // merged line: min stats + extraflags + affectbits
+  text+=`${mindex} ${minint} ${minwis} ${extraflagsVal} ${affectbitsVal}\n`;
+  text+=`${weight} ${gold} 0 ${maxload}\n`;
+
+  // Extra Descriptions (E) — keywords one line; description can be multi-line, final line ends with "~"
+  document.querySelectorAll(".extraDescGroup").forEach(group=>{
+    const kw=group.querySelector(".edKeywords").value.trim();
+    const descRaw=group.querySelector(".edText").value;
+    if(kw || descRaw.trim()){
+      text+="E\n"+kw+"~\n";
+      const lines = descRaw.split(/\r?\n/);
+      if(lines.length === 0){
+        text+="~\n";
+      }else{
+        for(let i=0;i<lines.length;i++){
+          const ln = lines[i];
+          if(i === lines.length - 1){
+            text += (ln.endsWith("~") ? ln : ln + "~") + "\n";
+          } else {
+            text += ln + "\n"; // intermediate lines (no tilde)
+          }
+        }
+      }
+    }
+  });
+
+  // S Sections
+  document.querySelectorAll(".sSectionGroup").forEach(group=>{
+    const freq=group.querySelector(".frequency").value||0;
+    const dmg=group.querySelector(".damage").value||"0d0+0";
+    const spell=group.querySelector(".spell").value||0;
+    const level=group.querySelector(".level").value||0;
+    const msg1=group.querySelector(".firstMsg").value||"";
+    const msg2=group.querySelector(".secondMsg").value||"";
+    const msg3=group.querySelector(".thirdMsg").value||"";
+    text+=`S\n${freq} ${dmg} ${spell} ${level}\n${msg1.endsWith("~")? msg1 : msg1+"~"}\n${msg2.endsWith("~")? msg2 : msg2+"~"}\n${msg3.endsWith("~")? msg3 : msg3+"~"}\n`;
+  });
+
+  // A Sections
+  document.querySelectorAll(".aSectionGroup").forEach(group=>{
+    const type=group.querySelector(".applyType").value||0;
+    const amt=group.querySelector(".applyAmount").value||0;
+    text+=`A\n${type} ${amt}\n`;
+  });
+
+  document.getElementById("output").value=text;
+  updateColorOutput();
+
+  // 80-char warnings for descs
+  document.querySelectorAll(".group label").forEach(lbl=>lbl.classList.remove("warning"));
+  text.split("\n").forEach(line=>{
+    if(stripColorCodes(line).length>80){
+      document.querySelectorAll(".group label").forEach(lbl=>{
+        if(lbl.textContent.includes("Short Description") || lbl.textContent.includes("Long Description") || lbl.textContent.includes("Wear Message")){
+          lbl.classList.add("warning");
+        }
+      });
+    }
+  });
+
+  // Messages
+  const msgDiv=document.getElementById("messages");
+  msgDiv.innerHTML="";
+  messages.forEach(m=>{
+    const p=document.createElement("div");
+    p.className="error"; p.textContent=m;
+    msgDiv.appendChild(p);
+  });
+}
+
+/*========================
+ Add/remove E/S/A sections
+========================*/
+document.getElementById("addExtraDesc").addEventListener("click",()=>{
+  const container=document.getElementById("extraDescriptionsContainer");
+  const div=document.createElement("div"); div.className="extraDescGroup";
+  const kwLabel=document.createElement("label"); kwLabel.textContent="Keywords"; 
+  const kwInput=document.createElement("input"); kwInput.type="text"; kwInput.className="edKeywords"; kwLabel.appendChild(kwInput);
+  const descLabel=document.createElement("label"); descLabel.textContent="Description (multi-line; ends with ~ on last line)"; 
+  const descInput=document.createElement("textarea"); descInput.className="edText"; descInput.style.width="100%"; descInput.style.height="50px"; descLabel.appendChild(descInput);
+  const removeBtn=document.createElement("button"); removeBtn.type="button"; removeBtn.textContent="Remove"; removeBtn.addEventListener("click",()=>{ div.remove(); updateOutput(); });
+  div.appendChild(kwLabel); div.appendChild(descLabel); div.appendChild(removeBtn);
+  container.appendChild(div);
+  [kwInput, descInput].forEach(inp=>inp.addEventListener("input", updateOutput));
+});
+
+document.getElementById("addSSection").addEventListener("click",()=>{
+  const container=document.getElementById("sSectionsContainer");
+  const div=document.createElement("div"); div.className="sSectionGroup";
+  div.innerHTML=`
+    <label>Frequency <input type="number" class="frequency" value="0"></label>
+    <label>Damage <input type="text" class="damage" value="0d0+0"></label>
+    <label>Spell <input type="number" class="spell" value="0"></label>
+    <label>Level <input type="number" class="level" value="0"></label>
+    <label>1st Person Message <input type="text" class="firstMsg"></label>
+    <label>2nd Person Message <input type="text" class="secondMsg"></label>
+    <label>3rd Person Message <input type="text" class="thirdMsg"></label>
+  `;
+  const removeBtn=document.createElement("button"); removeBtn.type="button"; removeBtn.textContent="Remove"; removeBtn.addEventListener("click",()=>{ div.remove(); updateOutput(); });
+  div.appendChild(removeBtn);
+  container.appendChild(div);
+  div.querySelectorAll("input").forEach(inp=>inp.addEventListener("input", updateOutput));
+});
+
+document.getElementById("addASection").addEventListener("click",()=>{
+  const container=document.getElementById("aSectionsContainer");
+  const div=document.createElement("div"); div.className="aSectionGroup";
+  div.innerHTML=`
+    <label>Apply Type <input type="number" class="applyType" value="0"></label>
+    <label>Apply Amount <input type="number" class="applyAmount" value="0"></label>
+  `;
+  const removeBtn=document.createElement("button"); removeBtn.type="button"; removeBtn.textContent="Remove"; removeBtn.addEventListener("click",()=>{ div.remove(); updateOutput(); });
+  div.appendChild(removeBtn);
+  container.appendChild(div);
+  div.querySelectorAll("input").forEach(inp=>inp.addEventListener("input", updateOutput));
+});
+
+/*========================
+ Main Inputs -> update
+========================*/
+document.querySelectorAll("input, select, textarea").forEach(el=>el.addEventListener("input", updateOutput));
+
+/*========================
+ Copy button
+========================*/
+document.getElementById("copyBtn").addEventListener("click",()=>{
+  const output=document.getElementById("output");
+  output.select();
+  navigator.clipboard.writeText(output.value);
+  alert("Copied!");
+});
+
+/*========================
+ Load From Text (parser)
+========================*/
+function loadFromText(){
+  const raw = document.getElementById("inputArea").value;
+  if(!raw.trim()){ alert("No text to load."); return; }
+  const lines = raw.split(/\r?\n/);
+  let idx = 0;
+
+  function peekLine(){ return idx < lines.length ? lines[idx] : ""; } // untrimmed for blank-preserving
+  function readLine(){ return idx < lines.length ? lines[idx++] : ""; } // untrimmed
+  function readLineTrim(){ return (idx < lines.length ? lines[idx++] : "").trim(); }
+  function readNextNonEmptyTrim(){
+    while(idx < lines.length && lines[idx].trim() === "") idx++;
+    return readLineTrim();
+  }
+  function stripTilde(s){ return s.replace(/~$/, ""); }
+
+  // Reset dynamic sections
+  document.getElementById("extraDescriptionsContainer").innerHTML="";
+  document.getElementById("sSectionsContainer").innerHTML="";
+  document.getElementById("aSectionsContainer").innerHTML="";
+
+  // Start parse
+  let line = readNextNonEmptyTrim();
+  if(line.startsWith("#")){
+    document.getElementById("vnum").value = line.slice(1).trim();
+    line = readNextNonEmptyTrim();
+  }
+
+  // keywords, short, long
+  document.getElementById("keywords").value   = stripTilde(line);
+  document.getElementById("shortdesc").value  = stripTilde(readNextNonEmptyTrim());
+  document.getElementById("longdesc").value   = stripTilde(readNextNonEmptyTrim());
+
+  // WEAR MESSAGE BLOCK
+  // Read until FLAGS line (^\d+\s). Preserve blanks.
+  let wearLines = [];
+  while(idx < lines.length){
+    const p = peekLine();
+    if(p.trim().match(/^\d+\s/)) break; // stop before flags line
+    const wl = readLine(); // keep as-is to preserve blank
+    wearLines.push(wl);
+  }
+  // Convert to textarea content: strip single trailing tilde from final line, and map a lone "~" line to blank
+  // Keep intermediate lines as-is (no tilde expected there in live files).
+  if(wearLines.length === 0){
+    document.getElementById("wearmsg").value = "";
+  } else {
+    // If last non-empty line ends with ~, remove it
+    // Also convert any line that's exactly "~" to ""
+    // Then join with \n
+    // Find last non-undefined index
+    let lastIdx = wearLines.length - 1;
+    if(lastIdx >= 0){
+      const last = wearLines[lastIdx];
+      if(last.trim().endsWith("~")) wearLines[lastIdx] = last.replace(/~\s*$/, "");
+    }
+    const normalized = wearLines.map(s => s.trim() === "~" ? "" : s.replace(/\r$/, ""));
+    // Trim leading/trailing blank lines in the textarea
+    const joined = normalized.join("\n").replace(/^\n+|\n+$/g,"");
+    document.getElementById("wearmsg").value = joined;
+  }
+
+  // FLAGS line
+  const parts = readNextNonEmptyTrim().split(/\s+/);
+  document.getElementById("objtype").value = parts[0] || "12";
+  makeCheckboxesValueSetter("objflags",    parts[1] || "0");
+  makeCheckboxesValueSetter("wearflags",   parts[2] || "0");
+  makeCheckboxesValueSetter("antiraces",   parts[3] || "0");
+  makeCheckboxesValueSetter("anticlasses", parts[4] || "0");
+
+  // VALUES line
+  const vals = readNextNonEmptyTrim().split(/\s+/);
+  document.getElementById("val0").value = vals[0] || 0;
+  document.getElementById("val1").value = vals[1] || 0;
+  document.getElementById("val2").value = vals[2] || 0;
+  document.getElementById("val3").value = vals[3] || 0;
+
+  // MIN + EXTRA + AFFECT on one line
+  const minline = readNextNonEmptyTrim().split(/\s+/);
+  document.getElementById("mindex").value = minline[0] || 0;
+  document.getElementById("minint").value = minline[1] || 0;
+  document.getElementById("minwis").value = minline[2] || 0;
+  makeCheckboxesValueSetter("extraflags", minline[3] || "0");
+  makeCheckboxesValueSetter("affectbits", minline[4] || "0");
+
+  // WEIGHT / GOLD / 0 / MAXLOAD
+  const wgml = readNextNonEmptyTrim().split(/\s+/);
+  document.getElementById("weight").value = wgml[0] || 0;
+  document.getElementById("gold").value   = wgml[1] || 0;
+  document.getElementById("maxload").value= wgml[3] || 0;
+
+  // Remaining sections
+  while(idx < lines.length){
+    let tag = readNextNonEmptyTrim();
+    if(!tag) break;
+
+    if(tag === "E"){
+      const kw = stripTilde(readNextNonEmptyTrim());
+      // multi-line description until a line ending with "~"
+      let descLines = [];
+      while(idx < lines.length){
+        const raw = readLine();             // raw line (preserve blanks)
+        descLines.push(raw.replace(/\r$/, ""));
+        if(raw.trim().endsWith("~")) break; // stop at tilde-terminated line (even if it's just "~")
+      }
+      const desc = descLines.join("\n").replace(/~\s*$/, "");
+      document.getElementById("addExtraDesc").click();
+      const group = document.querySelector("#extraDescriptionsContainer .extraDescGroup:last-child");
+      group.querySelector(".edKeywords").value = kw;
+      group.querySelector(".edText").value     = desc;
+    } else if(tag === "S"){
+      const sline = readNextNonEmptyTrim().split(/\s+/);
+      const freq = sline[0] || 0, dmg = sline[1] || "0d0+0", spell = sline[2] || 0, level = sline[3] || 0;
+      const msg1 = stripTilde(readNextNonEmptyTrim());
+      const msg2 = stripTilde(readNextNonEmptyTrim());
+      const msg3 = stripTilde(readNextNonEmptyTrim());
+      document.getElementById("addSSection").click();
+      const group = document.querySelector("#sSectionsContainer .sSectionGroup:last-child");
+      group.querySelector(".frequency").value = freq;
+      group.querySelector(".damage").value    = dmg;
+      group.querySelector(".spell").value     = spell;
+      group.querySelector(".level").value     = level;
+      group.querySelector(".firstMsg").value  = msg1;
+      group.querySelector(".secondMsg").value = msg2;
+      group.querySelector(".thirdMsg").value  = msg3;
+    } else if(tag === "A"){
+      const aline = readNextNonEmptyTrim().split(/\s+/);
+      const type = aline[0] || 0, amt = aline[1] || 0;
+      document.getElementById("addASection").click();
+      const group = document.querySelector("#aSectionsContainer .aSectionGroup:last-child");
+      group.querySelector(".applyType").value   = type;
+      group.querySelector(".applyAmount").value = amt;
+    } else {
+      // ignore unknown tags
+    }
+  }
+
+  updateOutput();
+}
+document.getElementById("loadBtn").addEventListener("click", loadFromText);
+
+/*========================
+ Initial call
+========================*/
+updateValHelp();
+updateOutput();
+</script>
+</body>
+</html>
