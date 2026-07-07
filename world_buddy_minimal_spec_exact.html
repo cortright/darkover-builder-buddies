@@ -78,11 +78,12 @@
   <div class="half">
     <header>
       <strong>World File Output</strong>
+      <button id="btnLoadWorld" style="float:right">Load From World Text</button>
       <button id="btnCopy" style="float:right">Copy to clipboard</button>
     </header>
     <main>
-      <textarea id="out" spellcheck="false" readonly></textarea>
-      <div class="muted">Format: Rooms are emitted in D0..D5 order, no blank lines before D/E, one blank line after S, sentinel at end.</div>
+      <textarea id="out" spellcheck="false"></textarea>
+      <div class="muted">Format: Rooms are emitted in D0..D5 order, no blank lines before D/E, one blank line after S, sentinel at end. Paste an existing world file above and click "Load From World Text" to load it in.</div>
     </main>
   </div>
 </div>
@@ -112,6 +113,7 @@
   const svg = document.getElementById('svg');
   const selV = document.getElementById('selectedV');
   const btnCopy = document.getElementById('btnCopy');
+  const btnLoadWorld = document.getElementById('btnLoadWorld');
   const autoLink = document.getElementById('autoLink');
   const testout = document.getElementById('testout');
   const flagsBox = document.getElementById('flagsBox');
@@ -259,6 +261,98 @@
     return outLines.join('\n')+'\n';
   }
 
+  function parseFlagsField(s){
+    if(s === '0' || s === '') return [];
+    return s.split('|').map(tok => parseInt(tok.replace(/^\^/, ''), 10)).filter(Number.isFinite);
+  }
+
+  // Inverse of roomsToWorld(): parses this tool's own .wld output back into
+  // a fresh rooms Map. Throws on any structural mismatch so the caller can
+  // bail out without touching current state (round-trip of own output only).
+  function worldToRooms(text){
+    const lines = text.split(/\r?\n/);
+    let idx = 0;
+    const peek = () => idx < lines.length ? lines[idx] : undefined;
+    const next = () => { if(idx >= lines.length) throw new Error('Unexpected end of input'); return lines[idx++]; };
+    const skipBlank = () => { while(idx < lines.length && lines[idx].trim() === '') idx++; };
+    const stripTilde = s => s.replace(/~\s*$/, '');
+
+    const parsed = new Map();
+
+    skipBlank();
+    while(peek() !== undefined){
+      const header = next().trim();
+      if(header === '#99999') break; // sentinel reached
+      const m = header.match(/^#(\d+)$/);
+      if(!m) throw new Error('Expected room header, got: ' + header);
+      const vnum = parseInt(m[1], 10);
+
+      const title = stripTilde(next());
+
+      // Long description: one or more lines until a lone "~" line
+      const longLines = [];
+      while(true){
+        const l = next();
+        if(l.trim() === '~') break;
+        longLines.push(l);
+      }
+      const long = longLines.join('\n');
+
+      const flagsLine = next().trim().split(/\s+/);
+      const zoneVal = parseInt(flagsLine[0], 10);
+      const flags = parseFlagsField(flagsLine[1] || '0');
+      const sector = parseInt(flagsLine[2], 10) || 0;
+
+      const exits = {};
+      while(peek() !== undefined && /^D\d$/.test(peek().trim())){
+        const dHeader = next().trim();
+        const dir = parseInt(dHeader.slice(1), 10);
+        // roomsToWorld() always emits exactly: desc text, "~" (closes desc),
+        // "~" (empty keywords line) before the door line — 3 lines, unused here.
+        next(); next(); next();
+        const doorLine = next().trim().split(/\s+/);
+        const toVnum = parseInt(doorLine[2], 10);
+        if(Number.isFinite(toVnum)) exits[dir] = toVnum;
+      }
+
+      const sLine = next().trim();
+      if(sLine !== 'S') throw new Error('Expected S terminator for room #' + vnum);
+
+      parsed.set(vnum, { vnum, zone: zoneVal, flags, sector, title, long, exits, pos: null });
+      skipBlank();
+    }
+
+    if(parsed.size === 0) throw new Error('No rooms found in input');
+
+    // Reconstruct grid positions via BFS over the exit graph, one pass per
+    // connected component (components are tiled along X so they don't overlap).
+    const allVnums = Array.from(parsed.keys()).sort((a,b)=>a-b);
+    const COMPONENT_SPACING = 10000;
+    let componentIndex = 0;
+    for(const startV of allVnums){
+      const startRoom = parsed.get(startV);
+      if(startRoom.pos !== null) continue; // already placed by an earlier BFS
+      startRoom.pos = [componentIndex * COMPONENT_SPACING, 0, 0];
+      const queue = [startV];
+      while(queue.length){
+        const v = queue.shift();
+        const r = parsed.get(v);
+        for(const d in r.exits){
+          const to = parsed.get(r.exits[d]);
+          if(!to || to.pos !== null) continue;
+          const vec = VEC[d];
+          to.pos = [r.pos[0]+vec[0], r.pos[1]+vec[1], r.pos[2]+vec[2]];
+          queue.push(to.vnum);
+        }
+      }
+      componentIndex++;
+    }
+
+    const zoneVal = parsed.get(allVnums[0]).zone;
+    const nextVnumVal = Math.max(...allVnums) + 1;
+    return { rooms: parsed, zone: zoneVal, nextVnum: nextVnumVal, rootVnum: allVnums[0] };
+  }
+
   function findRoomsAtPos(pos){
     const outArr=[]; for(const r of rooms.values()){ const q=r.pos; if(q[0]===pos[0] && q[1]===pos[1] && q[2]===pos[2]) outArr.push(r); }
     return outArr;
@@ -398,6 +492,31 @@
         console.error('Copy failed', err);
       }
     }
+  });
+
+  // Load From World Text (reverse of roomsToWorld)
+  btnLoadWorld.addEventListener('click', ()=>{
+    const text = out.value || '';
+    if(!text.trim()){ alert('No world text to load.'); return; }
+    let result;
+    try{
+      result = worldToRooms(text);
+    }catch(e){
+      alert('Could not parse world text: ' + e.message);
+      return;
+    }
+    // Parsed successfully in full before touching any live state; now commit.
+    snapshot();
+    zone = result.zone;
+    nextVnum = result.nextVnum;
+    rooms.clear();
+    result.rooms.forEach((r, v) => rooms.set(v, r));
+    selected = result.rootVnum;
+    selV.value = selected;
+    zoneInput.value = zone;
+    zoneInput.disabled = true;
+    refreshOutput();
+    renderGraph();
   });
 
   // Undo
