@@ -66,6 +66,26 @@
         <div class="muted" style="margin-top:6px">If auto-link is checked and the target cell already has a room, the button will link to it (and add a reciprocal if free). If empty, a new room is created. If multiple rooms exist, you will be prompted to pick a VNUM or leave blank to create new. Defaults affect only newly created rooms; existing rooms are unchanged.</div>
       </div>
 
+      <div class="panel" id="roomEditor">
+        <div class="muted" style="margin-bottom:6px">Edit selected room</div>
+        <div id="roomEditorPlaceholder" class="muted">Select a room in the graph to edit it.</div>
+        <div id="roomEditorForm" class="hidden">
+          <div class="row2"><label style="min-width:120px">Title <input id="editTitle" type="text" style="width:260px"></label></div>
+          <div class="row2" style="margin-top:6px;align-items:flex-start"><label for="editLong" style="min-width:120px">Long Description</label><textarea id="editLong" style="width:100%;min-height:60px;flex:none"></textarea></div>
+          <div class="row2" style="margin-top:6px"><label style="min-width:120px">Sector <select id="editSector"></select></label></div>
+          <div class="row2" style="margin-top:6px;align-items:flex-start">
+            <div>
+              <div class="muted">Room flags:</div>
+              <div id="editFlagsBox" class="muted" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px"></div>
+            </div>
+          </div>
+          <div style="margin-top:8px">
+            <div class="muted">Exits:</div>
+            <div id="editExitsBox" style="margin-top:4px"></div>
+          </div>
+        </div>
+      </div>
+
       <div>
         <div class="muted" style="margin-bottom:4px">Zone graph</div>
         <svg id="svg" class="graph" viewBox="-200 -200 400 400"></svg>
@@ -118,6 +138,14 @@
   const testout = document.getElementById('testout');
   const flagsBox = document.getElementById('flagsBox');
   const sectorSel = document.getElementById('sectorSel');
+  const roomEditorPlaceholder = document.getElementById('roomEditorPlaceholder');
+  const roomEditorForm = document.getElementById('roomEditorForm');
+  const editTitle = document.getElementById('editTitle');
+  const editLong = document.getElementById('editLong');
+  const editSector = document.getElementById('editSector');
+  const editFlagsBox = document.getElementById('editFlagsBox');
+  const editExitsBox = document.getElementById('editExitsBox');
+  let editSnapshotTaken = false; // reset whenever `selected` (re)assigned; first edit in a session snapshots once
 
   // ===== Helpers =====
   function makeRoom(vnum, pos){
@@ -133,6 +161,12 @@
     };
   }
 
+  function cloneExits(exits){
+    const out = {};
+    for(const d in exits){ const ex = exits[d]; out[d] = { to: ex.to, desc: ex.desc, keywords: ex.keywords }; }
+    return out;
+  }
+
   function snapshot(){
     // Deep clone minimal state
     const state = {
@@ -141,7 +175,7 @@
       selected,
       rooms: Array.from(rooms.values()).map(r=>({
         vnum:r.vnum, zone:r.zone, flags:Array.isArray(r.flags)?[...r.flags]:[], sector:r.sector, title:r.title, long:r.long,
-        exits:Object.assign({}, r.exits), pos:[...r.pos]
+        exits:cloneExits(r.exits), pos:[...r.pos]
       }))
     };
     history.push(state);
@@ -155,12 +189,14 @@
     selected = state.selected;
     state.rooms.forEach(r=>{ rooms.set(r.vnum, {
       vnum:r.vnum, zone:r.zone, flags:Array.isArray(r.flags)?[...r.flags]:[], sector:r.sector, title:r.title, long:r.long,
-      exits:Object.assign({}, r.exits), pos:[...r.pos]
+      exits:cloneExits(r.exits), pos:[...r.pos]
     }); });
     zoneInput.disabled = !!zone;
     selV.value = selected || '';
+    editSnapshotTaken = false;
     refreshOutput();
     renderGraph();
+    renderRoomEditor();
     btnUndo.disabled = history.length===0;
   }
 
@@ -174,7 +210,7 @@
   function ensureExit(fromV, dir, toV){
     const r = rooms.get(fromV); if(!r) return;
     if(r.exits.hasOwnProperty(dir)) return; // already exists, do nothing
-    r.exits[dir] = toV;
+    r.exits[dir] = { to: toV, desc: 'A passage leads '+DIRS[dir]+'.', keywords: '' };
   }
 
   function addNeighbor(baseV, dir){
@@ -245,12 +281,14 @@
       // Exits in D0..D5 order
       for(let d=0; d<=5; d++){
         if(r.exits.hasOwnProperty(d)){
-          const to = r.exits[d];
+          const ex = r.exits[d];
+          const desc = (ex.desc && ex.desc.trim()) ? ex.desc.trim() : ('A passage leads '+DIRS[d]+'.');
+          const kw = (ex.keywords && ex.keywords.trim()) ? ex.keywords.trim()+'~' : '~';
           outLines.push('D'+d);
-          outLines.push('A passage leads '+DIRS[d]+'.');
+          outLines.push(desc);
           outLines.push('~');
-          outLines.push('~');
-          outLines.push('0 0 '+to);
+          outLines.push(kw);
+          outLines.push('0 0 '+ex.to);
         }
       }
       outLines.push('S');
@@ -308,11 +346,13 @@
         const dHeader = next().trim();
         const dir = parseInt(dHeader.slice(1), 10);
         // roomsToWorld() always emits exactly: desc text, "~" (closes desc),
-        // "~" (empty keywords line) before the door line — 3 lines, unused here.
-        next(); next(); next();
+        // keywords line (possibly empty, always "~"-terminated), then the door line.
+        const desc = stripTilde(next());
+        next(); // closing "~" for desc
+        const keywords = stripTilde(next());
         const doorLine = next().trim().split(/\s+/);
         const toVnum = parseInt(doorLine[2], 10);
-        if(Number.isFinite(toVnum)) exits[dir] = toVnum;
+        if(Number.isFinite(toVnum)) exits[dir] = { to: toVnum, desc, keywords };
       }
 
       const sLine = next().trim();
@@ -338,7 +378,7 @@
         const v = queue.shift();
         const r = parsed.get(v);
         for(const d in r.exits){
-          const to = parsed.get(r.exits[d]);
+          const to = parsed.get(r.exits[d].to);
           if(!to || to.pos !== null) continue;
           const vec = VEC[d];
           to.pos = [r.pos[0]+vec[0], r.pos[1]+vec[1], r.pos[2]+vec[2]];
@@ -416,7 +456,7 @@
     for(const r of nodes){
       const p1 = posMap.get(r.vnum);
       for(const d in r.exits){
-        const to = rooms.get(r.exits[d]); if(!to) continue;
+        const to = rooms.get(r.exits[d].to); if(!to) continue;
         const p2 = posMap.get(to.vnum);
         const line=document.createElementNS('http://www.w3.org/2000/svg','line');
         line.setAttribute('x1',p1.x); line.setAttribute('y1',p1.y);
@@ -436,10 +476,107 @@
       const t=document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('y','-3.5'); t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','3'); t.textContent = r.vnum;
       g.appendChild(c); g.appendChild(t);
       g.style.cursor='pointer';
-      g.addEventListener('click',()=>{ selected=r.vnum; selV.value=r.vnum; renderGraph(); });
+      g.addEventListener('click',()=>{ selected=r.vnum; selV.value=r.vnum; editSnapshotTaken=false; renderGraph(); renderRoomEditor(); });
       svg.appendChild(g);
     }
   }
+
+  // ===== Room Editor (edit the selected room in place) =====
+  function snapshotOnceForEdit(){
+    if(editSnapshotTaken) return;
+    snapshot();
+    editSnapshotTaken = true;
+  }
+
+  function renderEditFlagControls(room){
+    editFlagsBox.innerHTML='';
+    FLAG_OPTS.forEach(opt=>{
+      const id = 'ef_'+opt.n;
+      const w = document.createElement('label');
+      w.style.display='inline-flex'; w.style.alignItems='center'; w.style.gap='4px';
+      w.innerHTML = `<input type="checkbox" id="${id}"><span>^${opt.n} ${opt.label}</span>`;
+      editFlagsBox.appendChild(w);
+      const cb = w.querySelector('input');
+      cb.checked = room.flags.includes(opt.n);
+      cb.addEventListener('change', ()=>{
+        snapshotOnceForEdit();
+        const r = rooms.get(selected); if(!r) return;
+        const arr=[]; FLAG_OPTS.forEach(o=>{ const box=document.getElementById('ef_'+o.n); if(box && box.checked) arr.push(o.n); });
+        arr.sort((a,b)=>a-b); r.flags = arr;
+        refreshOutput();
+      });
+    });
+  }
+
+  function renderEditExits(room){
+    editExitsBox.innerHTML='';
+    for(let d=0; d<=5; d++){
+      if(!room.exits.hasOwnProperty(d)) continue;
+      const ex = room.exits[d];
+      const row = document.createElement('div');
+      row.className='row2';
+      row.style.marginTop='4px';
+      row.innerHTML = `
+        <span class="muted" style="min-width:140px">${DIRS[d]} (D${d}) &rarr; #${ex.to}</span>
+        <input type="text" class="exitDesc" placeholder="Description" style="width:220px">
+        <input type="text" class="exitKeywords" placeholder="Keywords" style="width:120px">
+      `;
+      const descInput = row.querySelector('.exitDesc');
+      const kwInput = row.querySelector('.exitKeywords');
+      descInput.value = ex.desc || '';
+      kwInput.value = ex.keywords || '';
+      descInput.addEventListener('input', ()=>{
+        snapshotOnceForEdit();
+        const r = rooms.get(selected); if(!r || !r.exits[d]) return;
+        r.exits[d].desc = descInput.value;
+        refreshOutput();
+      });
+      kwInput.addEventListener('input', ()=>{
+        snapshotOnceForEdit();
+        const r = rooms.get(selected); if(!r || !r.exits[d]) return;
+        r.exits[d].keywords = kwInput.value;
+        refreshOutput();
+      });
+      editExitsBox.appendChild(row);
+    }
+  }
+
+  function renderRoomEditor(){
+    const room = selected ? rooms.get(selected) : null;
+    if(!room){
+      roomEditorPlaceholder.classList.remove('hidden');
+      roomEditorForm.classList.add('hidden');
+      return;
+    }
+    roomEditorPlaceholder.classList.add('hidden');
+    roomEditorForm.classList.remove('hidden');
+
+    editTitle.value = room.title;
+    editLong.value = room.long;
+    editSector.value = String(room.sector);
+    renderEditFlagControls(room);
+    renderEditExits(room);
+  }
+
+  editTitle.addEventListener('input', ()=>{
+    snapshotOnceForEdit();
+    const r = rooms.get(selected); if(!r) return;
+    r.title = editTitle.value;
+    refreshOutput();
+  });
+  editLong.addEventListener('input', ()=>{
+    snapshotOnceForEdit();
+    const r = rooms.get(selected); if(!r) return;
+    r.long = editLong.value;
+    refreshOutput();
+  });
+  editSector.addEventListener('change', ()=>{
+    snapshotOnceForEdit();
+    const r = rooms.get(selected); if(!r) return;
+    const s = parseInt(editSector.value,10);
+    r.sector = Number.isFinite(s) ? s : 0;
+    refreshOutput();
+  });
 
   // ===== Actions =====
   btnGen.addEventListener('click', ()=>{
@@ -455,11 +592,13 @@
     rooms.clear();
     const first = addRoom([0,0,0]); // creates zone*100
     selected = first.vnum; selV.value = selected;
+    editSnapshotTaken = false;
     // lock zone input (grey out)
     zoneInput.disabled = true;
     // output & graph
     refreshOutput();
     renderGraph();
+    renderRoomEditor();
   });
 
   // Direction buttons
@@ -475,6 +614,7 @@
       addNeighbor(selected, dir);
       refreshOutput();
       renderGraph();
+      renderRoomEditor(); // refresh Exits list so the new exit appears immediately
     });
   });
 
@@ -513,10 +653,12 @@
     result.rooms.forEach((r, v) => rooms.set(v, r));
     selected = result.rootVnum;
     selV.value = selected;
+    editSnapshotTaken = false;
     zoneInput.value = zone;
     zoneInput.disabled = true;
     refreshOutput();
     renderGraph();
+    renderRoomEditor();
   });
 
   // Undo
@@ -546,6 +688,10 @@
     {n:21, label:'Limited'}
   ];
 
+  const SECTORS = [
+    [0,'Inside'],[1,'City Streets'],[2,'Field'],[3,'Forest'],[4,'Hills'],[5,'Mountain'],[6,'Water, shallow'],[7,'Water, need boat'],[8,'No Ground, needs fly'],[9,'Peace Room'],[10,'Underwater'],[11,'Fire Plane'],[12,'Ocean (not used)'],[13,'Earth Room'],[14,'In Object'],[15,'Arena (Do Not Use)'],[16,'Cave'],[17,'Astral'],[18,'Cold'],[19,'Desert'],[20,'Steep mountain']
+  ];
+
   function renderFlagControls(){
     if(!flagsBox) return;
     flagsBox.innerHTML='';
@@ -560,17 +706,18 @@
     });
   }
 
-  function renderSectorOptions(){
-    if(!sectorSel) return;
-    const SECTORS = [
-      [0,'Inside'],[1,'City Streets'],[2,'Field'],[3,'Forest'],[4,'Hills'],[5,'Mountain'],[6,'Water, shallow'],[7,'Water, need boat'],[8,'No Ground, needs fly'],[9,'Peace Room'],[10,'Underwater'],[11,'Fire Plane'],[12,'Ocean (not used)'],[13,'Earth Room'],[14,'In Object'],[15,'Arena (Do Not Use)'],[16,'Cave'],[17,'Astral'],[18,'Cold'],[19,'Desert'],[20,'Steep mountain']
-    ];
-    sectorSel.innerHTML='';
+  function populateSectorSelect(selectEl){
+    selectEl.innerHTML='';
     SECTORS.forEach(([val,label])=>{
       const opt=document.createElement('option');
       opt.value=String(val); opt.textContent = `${val} — ${label}`;
-      sectorSel.appendChild(opt);
+      selectEl.appendChild(opt);
     });
+  }
+
+  function renderSectorOptions(){
+    if(!sectorSel) return;
+    populateSectorSelect(sectorSel);
     sectorSel.value='0';
     defaultSector = 0;
   }
@@ -585,9 +732,11 @@
 
   renderFlagControls();
   renderSectorOptions();
+  populateSectorSelect(editSector);
   // keep defaults live when the dropdown changes
   if(sectorSel) sectorSel.addEventListener('change', syncDefaultsFromUI);
   syncDefaultsFromUI();
+  renderRoomEditor(); // initial state: no room selected yet
 
   // ===== Minimal Tests =====
   btnTests.addEventListener('click', ()=>{
