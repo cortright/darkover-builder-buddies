@@ -70,7 +70,7 @@
         <div class="muted" style="margin-bottom:6px">Edit selected room</div>
         <div id="roomEditorPlaceholder" class="muted">Select a room in the graph to edit it.</div>
         <div id="roomEditorForm" class="hidden">
-          <div class="row2"><label style="min-width:120px">Title <input id="editTitle" type="text" style="width:260px"></label></div>
+          <div class="row2"><label for="editTitle" style="min-width:120px">Title</label><input id="editTitle" type="text" style="flex:1"></div>
           <div class="row2" style="margin-top:6px;align-items:flex-start"><label for="editLong" style="min-width:120px">Long Description</label><textarea id="editLong" style="width:100%;min-height:60px;flex:none"></textarea></div>
           <div class="row2" style="margin-top:6px"><label style="min-width:120px">Sector <select id="editSector"></select></label></div>
           <div class="row2" style="margin-top:6px;align-items:flex-start">
@@ -473,7 +473,7 @@
       g.setAttribute('transform',`translate(${p.x},${p.y})`);
       const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
       c.setAttribute('r','2.5'); c.setAttribute('fill', r.vnum===selected?'#2a7':'#58a'); c.setAttribute('stroke','#134'); c.setAttribute('stroke-width','0.25');
-      const t=document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('y','-3.5'); t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','3'); t.textContent = r.vnum;
+      const t=document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('y','-4.5'); t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','6'); t.textContent = r.vnum;
       g.appendChild(c); g.appendChild(t);
       g.style.cursor='pointer';
       g.addEventListener('click',()=>{ selected=r.vnum; selV.value=r.vnum; editSnapshotTaken=false; renderGraph(); renderRoomEditor(); });
